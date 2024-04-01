@@ -49,7 +49,6 @@ configs_raw = {
             "reward_scale": (1 / 100, 0)
         },
         "preprocess": {
-            "frame_stack": 4,
             "atari": False
         }
     },

@@ -8,6 +8,7 @@ import torch.nn as nn
 import gymnasium as gym
 
 import matplotlib
+
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
@@ -19,6 +20,38 @@ from torch.nn.utils import clip_grad_norm_
 from good_rainbow_src.memory_replay import PrioritizedReplayBuffer, ReplayBuffer
 from good_rainbow_src.network_models import Network
 
+class FrozenClass(object):
+    __isfrozen = False
+    def __setattr__(self, key, value):
+        if self.__isfrozen and not hasattr(self, key):
+            raise TypeError( "%r is a frozen class" % self )
+        object.__setattr__(self, key, value)
+
+    def _freeze(self):
+        self.__isfrozen = True
+
+
+class TrainingState(FrozenClass):
+    def __init__(self, env, conv_space, correct_dims, action_dim):
+        self.is_test = False
+        self.stop = False
+
+        self.state, _ = env.reset()  # seed=self.seed)
+        if conv_space is True and correct_dims:
+            self.state = self.state.transpose(2, 0, 1)
+
+        self.update_cnt = 0
+        # TODO we need class for that
+        self.losses = []
+        self.scores = []
+        self.ep_lens = []
+        self.action_histograms = []
+        self.guide_epsilons = []
+        self.score = 0
+        self.last_frame_ep_end = 1
+        self.action_hist = np.zeros(action_dim)
+        self.guide_epsilon = 1
+        self._freeze() # no new attributes after this point.
 
 class DQNAgent:
     """DQN Agent interacting with environment.
@@ -106,8 +139,6 @@ class DQNAgent:
         self.conv_space = conv_space
         obs_dim = env.observation_space.shape
 
-        obs_dim = tuple([obs_dim[0] * obs_dim[1]])
-
         if len(obs_dim) > 1 and correct_dims:
             obs_dim = (obs_dim[2], obs_dim[0], obs_dim[1])
         action_dim = env.action_space.n
@@ -126,7 +157,6 @@ class DQNAgent:
         )
         print(self.device)
 
-        self.stop = False
 
         # PER
         # memory for 1-step Learning
@@ -169,8 +199,6 @@ class DQNAgent:
         # transition to store in memory
         self.transition = list()
 
-        # mode: train / test
-        self.is_test = False
 
         # ploting utils
         self.target_update_eps = []
@@ -180,15 +208,17 @@ class DQNAgent:
         self.teacher_network = None
         # guided network experiment
         if guided_network is not None:
-            #self.end_avg_reward = 0
+            # self.end_avg_reward = 0
             self.teacher_network = Network(
                 obs_dim, action_dim, self.atom_size, self.support, conv_space=conv_space
             ).to(self.device)
             self.teacher_network.load_state_dict(guided_network["model"])
             self.teacher_avg_reward = guided_network["reward"]
-            self.init_avg_reward = sys.float_info.min/100
-            self.end_avg_reward = sys.float_info.min/100
+            self.init_avg_reward = sys.float_info.min / 100
+            self.end_avg_reward = sys.float_info.min / 100
         # end of guided network experiment
+        self.training_state = TrainingState(self.env, self.conv_space, self.correct_dims, self.action_dim)
+        self.training_state.stop = False
 
     def select_action(self, state: np.ndarray, force_epsilon=None, network=None) -> np.ndarray:
         if network is None:
@@ -212,7 +242,9 @@ class DQNAgent:
             ).argmax()
             selected_action = selected_action.detach().cpu().numpy()
 
-        if not self.is_test:
+        # mode: train / test
+        self.training_state.is_test = False
+        if not self.training_state.is_test:
             self.transition = [state, selected_action]
 
         return selected_action
@@ -227,14 +259,11 @@ class DQNAgent:
             reward = reward + self.reward_scale[1]
             reward = reward * self.reward_scale[0]
 
-        # TODO test
-        next_state = np.array([np.array(next_state).flatten()])
-        # TODO test
         if self.conv_space is True and self.correct_dims:
             next_state = next_state.transpose(2, 0, 1)  # TODO maybe just transpose it in nn
         done = terminated or truncated
 
-        if not self.is_test:
+        if not self.training_state.is_test:
             self.transition += [reward, next_state, done]
 
             # N-step transition
@@ -294,117 +323,93 @@ class DQNAgent:
 
         return loss.item()
 
+    def train_init(self):
+        self.training_state = TrainingState(self.env, self.conv_space, self.correct_dims, self.action_dim)
+
+    def train_step(self, frame_idx, num_frames: int, plotting_interval: int = 10000, testing_function=None):
+        if self.teacher_network is not None and self.end_avg_reward < self.teacher_avg_reward:
+            self.training_state.guide_epsilon = min(max((self.teacher_avg_reward - self.end_avg_reward) / (
+                    self.teacher_avg_reward - self.init_avg_reward), 0), 1)
+            if self.training_state.guide_epsilon > np.random.random() and len(self.memory) >= self.min_memory_size:
+                teacher = self.teacher_network
+                action = self.select_action(self.training_state.state, network=teacher)
+            else:
+                action = self.select_action(self.training_state.state, network=self.dqn, force_epsilon=0.75 * self.training_state.guide_epsilon)
+        else:
+            action = self.select_action(self.training_state.state)
+        self.training_state.action_hist[action] += 1
+        next_state, reward, done = self.step(action)
+
+        self.training_state.state = next_state
+        self.training_state.score += reward
+
+        # NoisyNet: removed decrease of epsilon # TODO added as NoisyNet encapsulate randomnes and network can learn to remove randomnes from the input to much in early learing
+        self.epsilon = max(
+            self.min_epsilon, self.epsilon - (
+                    self.max_epsilon - self.min_epsilon
+            ) * self.epsilon_decay
+        )
+
+        # PER: increase beta
+        fraction = min(frame_idx / num_frames, 1.0)
+        self.beta = self.beta + fraction * (1.0 - self.beta)
+
+        # if episode ends
+        if done:
+            # FIXME need to test before reset god knows why
+            if testing_function is not None and len(self.memory) >= self.min_memory_size:  # we dont want random
+                testing_function(len(self.training_state.scores))
+            self.training_state.state, _ = self.env.reset()  # seed=self.seed)# TODO ensure that is deterministic commenting because of all same env
+            if self.conv_space is True and self.correct_dims:
+                self.training_state.state = self.training_state.state.transpose(2, 0, 1)
+            self.training_state.scores.append(self.training_state.score)
+            self.training_state.ep_lens.append(frame_idx - self.training_state.last_frame_ep_end)
+            self.training_state.action_hist = [i / (sum(self.training_state.action_hist)) for i in self.training_state.action_hist]
+            self.training_state.action_hist = np.flip(np.cumsum(np.flip(self.training_state.action_hist)))
+            self.training_state.action_histograms.append(self.training_state.action_hist)
+            self.training_state.guide_epsilons.append(self.training_state.guide_epsilon)
+            self.training_state.score = 0
+            self.training_state.last_frame_ep_end = frame_idx
+            self.training_state.action_hist = np.zeros(self.action_dim)
+            self.end_avg_reward = sum(self.training_state.scores[-10:]) / 10
+
+        # if training is ready
+        if len(self.memory) >= self.batch_size and len(
+                self.memory) >= self.min_memory_size and frame_idx % self.learning_interval == 0:
+            loss = self.update_model()
+            self.training_state.losses.append(loss)
+            self.training_state.update_cnt += 1
+
+            # if hard update is needed
+            if self.training_state.update_cnt % self.target_update == 0:
+                self.target_update_steps.append(len(self.training_state.losses))
+                self.target_update_eps.append(len(self.training_state.scores))
+                self._target_hard_update()
+
+        # plotting
+        if frame_idx % plotting_interval == 0:
+            self._plot(frame_idx, self.training_state.scores, self.training_state.losses, self.training_state.ep_lens,
+                       self.training_state.action_histograms)  # ,guide_epsilons)  # add action distribution, and when plotting we can add noise param avg and variance
+
     def train(self, num_frames: int, plotting_interval: int = 10000, testing_function=None):
         """Train the agent."""
-        self.is_test = False
-        self.stop = False
-
-        state, _ = self.env.reset()  # seed=self.seed)
-        # TODO test
-        state = np.array([np.array(state).flatten()])
-        # TODO test
-        if self.conv_space is True and self.correct_dims:
-            state = state.transpose(2, 0, 1)
-
-        update_cnt = 0
-        # TODO we need class for that
-        losses = []
-        scores = []
-        ep_lens = []
-        action_histograms = []
-        guide_epsilons = []
-        score = 0
-        last_frame_ep_end = 1
-        action_hist = np.zeros(self.action_dim)
-        guide_epsilon = 1
-
+        self.train_init()
         for frame_idx in range(1, num_frames + 1):
-            if self.teacher_network is not None and self.end_avg_reward < self.teacher_avg_reward:
-                guide_epsilon = min(max((self.teacher_avg_reward - self.end_avg_reward) / (
-                        self.teacher_avg_reward - self.init_avg_reward), 0), 1)
-                if guide_epsilon > np.random.random() and len(self.memory) >= self.min_memory_size:
-                    teacher = self.teacher_network
-                    action = self.select_action(state, network=teacher)
-                else:
-                    action = self.select_action(state, network=self.dqn, force_epsilon=0.75*guide_epsilon)
-            else:
-                action = self.select_action(state)
-            action_hist[action] += 1
-            next_state, reward, done = self.step(action)
-
-            state = next_state
-            score += reward
-
-            # NoisyNet: removed decrease of epsilon # TODO added as NoisyNet encapsulate randomnes and network can learn to remove randomnes from the input to much in early learing
-            self.epsilon = max(
-                self.min_epsilon, self.epsilon - (
-                        self.max_epsilon - self.min_epsilon
-                ) * self.epsilon_decay
-            )
-
-            # PER: increase beta
-            fraction = min(frame_idx / num_frames, 1.0)
-            self.beta = self.beta + fraction * (1.0 - self.beta)
-
-            # if episode ends
-            if done:
-
-                # FIXME need to test before reset god knows why
-                if testing_function is not None and len(self.memory) >= self.min_memory_size:  # we dont want random
-                    testing_function(len(scores))
-                state, _ = self.env.reset()  # seed=self.seed)# TODO ensure that is deterministic commenting because of all same env
-                # TODO test
-                state = np.array([np.array(state).flatten()])
-                # TODO test
-                if self.conv_space is True and self.correct_dims:
-                    state = state.transpose(2, 0, 1)
-                scores.append(score)
-                ep_lens.append(frame_idx - last_frame_ep_end)
-                action_hist = [i/(sum(action_hist)) for i in action_hist]
-                action_hist = np.flip(np.cumsum(np.flip(action_hist)))
-                action_histograms.append(action_hist)
-                guide_epsilons.append(guide_epsilon)
-                score = 0
-                last_frame_ep_end = frame_idx
-                action_hist = np.zeros(self.action_dim)
-                self.end_avg_reward = sum(scores[-10:])/10
-
-            # if training is ready
-            if len(self.memory) >= self.batch_size and len(
-                    self.memory) >= self.min_memory_size and frame_idx % self.learning_interval == 0:
-                loss = self.update_model()
-                losses.append(loss)
-                update_cnt += 1
-
-                # if hard update is needed
-                if update_cnt % self.target_update == 0:
-                    self.target_update_steps.append(len(losses))
-                    self.target_update_eps.append(len(scores))
-                    self._target_hard_update()
-
-            # plotting
-            if frame_idx % plotting_interval == 0:
-                self._plot(frame_idx, scores, losses, ep_lens,
-                           action_histograms)#,guide_epsilons)  # add action distribution, and when plotting we can add noise param avg and variance
-                # FIXME dummy learning stop
-                if self.stop:
-                    break
-
+            self.train_step(frame_idx, num_frames, plotting_interval, testing_function)
+            if self.training_state.stop and frame_idx % plotting_interval == 0:
+                break  # TODO breaking not workin after moving
         self.env.close()
 
     # TODO we dont really need test for recording during learning as RecordVideo enables ep_number trigger
     def test(self, video_folder: str, video_prefix="rl-video") -> None:
         """Test the agent."""
-        self.is_test = True
+        self.training_state.is_test = True
 
         # for recording a video
         naive_env = self.env
         self.env = gym.wrappers.RecordVideo(self.env, name_prefix=video_prefix, video_folder=video_folder)
 
         state, _ = self.env.reset(seed=self.seed)
-        # TODO test
-        state = np.array([np.array(state).flatten()])
-        # TODO test
         if self.conv_space is True and self.correct_dims:
             state = state.transpose(2, 0, 1)
         done = False
@@ -422,7 +427,7 @@ class DQNAgent:
 
         # reset
         self.env = naive_env
-        self.is_test = False
+        self.training_state.is_test = False
 
     def _compute_dqn_loss(self, samples: Dict[str, np.ndarray], gamma: float) -> torch.Tensor:
         """Return categorical dqn loss."""
@@ -518,16 +523,17 @@ class DQNAgent:
             self.axes[3].clear()
             self.axes[3].set_title('Action histogram')
 
-            #for target_update_ep in self.target_update_eps:
+            # for target_update_ep in self.target_update_eps:
             #    self.axes[3].axvline(x=target_update_ep, color='g')
 
             action_histograms_tmp = np.array(action_histograms)
             self.axes[3].plot(action_histograms_tmp)
             for i in range(action_histograms_tmp.shape[1]):
-                if 1+i < action_histograms_tmp.shape[1]:
-                    self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i], action_histograms_tmp[:, i+1])
+                if 1 + i < action_histograms_tmp.shape[1]:
+                    self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i],
+                                              action_histograms_tmp[:, i + 1])
                 else:
-                    self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i] )
+                    self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i])
 
             # plt.draw()
             if self.save_fig is not None:
@@ -540,9 +546,9 @@ class DQNAgent:
 
             if len(ma_vec_100) > 0 and len(self.memory) >= self.min_memory_size:
                 if self.teacher_network is not None:
-                    if self.init_avg_reward == sys.float_info.min/100:
+                    if self.init_avg_reward == sys.float_info.min / 100:
                         self.init_avg_reward = ma_vec_100[-1]
-                #self.end_avg_reward = ma_vec_100[-1]
+                # self.end_avg_reward = ma_vec_100[-1]
 
     # TODO not needed
     def _plot_ipython3(
