@@ -105,6 +105,17 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return self.size
 
+    def __str__(self) -> str:
+        return str(
+            'ReplayBuffer {\n' +
+            f'   size: {len(self)}\n' +
+            f'   max_size: {self.max_size}\n' +
+            f'   batch_size: {self.batch_size}\n' +
+            f'   n_step: {self.n_step}\n' +
+            f'   gamma: {self.gamma}\n' +
+            '}\n'
+        )
+
 
 class PrioritizedReplayBuffer(ReplayBuffer):
     """Prioritized Replay buffer.

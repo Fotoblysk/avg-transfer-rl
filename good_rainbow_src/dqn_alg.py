@@ -6,7 +6,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import gymnasium as gym
+
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+
 from torch import optim
 from typing import Dict, List, Tuple
 
@@ -60,8 +64,8 @@ class DQNAgent:
             conv_space: bool = False,
             min_memory_size: int = 80000,
             learning_interval: int = 4,  # is for 32 batch_size
-            epsilon_decay: float = 1 / 2000000,  # min after 2M epizodes
-            max_epsilon: float = 1,
+            epsilon_decay: float = 1 / 1000000,  # min after 1M epizodes
+            max_epsilon: float = 0,
             min_epsilon: float = 0.0,
             correct_dims: bool = False,
             reward_clip=None,
@@ -101,7 +105,8 @@ class DQNAgent:
         self.learning_interval = learning_interval
         self.conv_space = conv_space
         obs_dim = env.observation_space.shape
-        print(obs_dim)
+
+        obs_dim = tuple([obs_dim[0] * obs_dim[1]])
 
         if len(obs_dim) > 1 and correct_dims:
             obs_dim = (obs_dim[2], obs_dim[0], obs_dim[1])
@@ -120,6 +125,8 @@ class DQNAgent:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         print(self.device)
+
+        self.stop = False
 
         # PER
         # memory for 1-step Learning
@@ -220,6 +227,9 @@ class DQNAgent:
             reward = reward + self.reward_scale[1]
             reward = reward * self.reward_scale[0]
 
+        # TODO test
+        next_state = np.array([np.array(next_state).flatten()])
+        # TODO test
         if self.conv_space is True and self.correct_dims:
             next_state = next_state.transpose(2, 0, 1)  # TODO maybe just transpose it in nn
         done = terminated or truncated
@@ -287,8 +297,12 @@ class DQNAgent:
     def train(self, num_frames: int, plotting_interval: int = 10000, testing_function=None):
         """Train the agent."""
         self.is_test = False
+        self.stop = False
 
         state, _ = self.env.reset()  # seed=self.seed)
+        # TODO test
+        state = np.array([np.array(state).flatten()])
+        # TODO test
         if self.conv_space is True and self.correct_dims:
             state = state.transpose(2, 0, 1)
 
@@ -339,6 +353,9 @@ class DQNAgent:
                 if testing_function is not None and len(self.memory) >= self.min_memory_size:  # we dont want random
                     testing_function(len(scores))
                 state, _ = self.env.reset()  # seed=self.seed)# TODO ensure that is deterministic commenting because of all same env
+                # TODO test
+                state = np.array([np.array(state).flatten()])
+                # TODO test
                 if self.conv_space is True and self.correct_dims:
                     state = state.transpose(2, 0, 1)
                 scores.append(score)
@@ -370,7 +387,7 @@ class DQNAgent:
                 self._plot(frame_idx, scores, losses, ep_lens,
                            action_histograms)#,guide_epsilons)  # add action distribution, and when plotting we can add noise param avg and variance
                 # FIXME dummy learning stop
-                if os.path.isfile('file_stop'):
+                if self.stop:
                     break
 
         self.env.close()
@@ -385,6 +402,9 @@ class DQNAgent:
         self.env = gym.wrappers.RecordVideo(self.env, name_prefix=video_prefix, video_folder=video_folder)
 
         state, _ = self.env.reset(seed=self.seed)
+        # TODO test
+        state = np.array([np.array(state).flatten()])
+        # TODO test
         if self.conv_space is True and self.correct_dims:
             state = state.transpose(2, 0, 1)
         done = False
@@ -509,10 +529,10 @@ class DQNAgent:
                 else:
                     self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i] )
 
-            plt.draw()
+            # plt.draw()
             if self.save_fig is not None:
-                plt.savefig(self.save_fig)
-            plt.pause(0.01)
+                plt.savefig(self.save_fig, dpi=300)
+            # plt.pause(0.01)
 
             # Guided network experiment
             cumsum_vec = np.cumsum(np.insert(rewards, 0, 0))
