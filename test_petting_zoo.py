@@ -1,7 +1,6 @@
 #from pettingzoo.classic import rps_v2
 from pettingzoo.mpe import simple_world_comm_v3
 
-
 env = simple_world_comm_v3.env(render_mode="human")
 env.reset(seed=42)
 
