@@ -7,4 +7,7 @@ export I_ID=$(echo "$query_result" | awk 'NR==2 {print $1}')
 echo "$I_ID"
 
 
-vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 16 --ssh --direct --env 'MY_RUNNER_ID=2' --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";
+vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 16 --ssh --direct --env '-e MY_RUNNER_ID=2' --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";
+
+
+
