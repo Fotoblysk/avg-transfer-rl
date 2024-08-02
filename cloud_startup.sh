@@ -1,4 +1,5 @@
-git clone https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/
+git clone https://github.com/Fotoblysk/avg-transfer-rl
+echo $MY_RUNNER_ID > runner_id
 cd avg-transfer-rl
 git checkout cloud_sync
 python3 -m venv venv
