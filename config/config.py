@@ -22,7 +22,7 @@ def get_configs(configs_to_inject):
         },
         "params": {
             "seed": 123,
-            "num_frames": 20000,
+            "num_frames": 2000,
             "memory_size": 100000,
             # in orginal is 1M sadly not anough ram 0.4M should be possible tho might get to swap so 0.3 for safety # goes to swap :( 0.09 for now
             "batch_size": 32,  # on internet  128 *12 test, 32 in paper
