@@ -9,5 +9,39 @@ echo "$I_ID"
 
 vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 16 --ssh --direct --env '-e MY_RUNNER_ID=2' --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";
 
+not_all_done="1"
+
+while [ "$not_all_done" != "0" ]; do
+  echo 'Periodic check for done instances'
+  not_all_done="0"
+  export INSTANCES_RAW=$(vastai show instances)
+  instances_n=$(echo "$INSTANCES_RAW" | wc -l)
+  for i in $(seq 2 $instances_n)
+  do
+    echo "Current number: $i"
+    instance_id=$(echo "$INSTANCES_RAW" | awk 'NR=='"$i"' {print $1}')
+    echo "Instance id: $instance_id"
+    ssh_url=$(vastai ssh-url "$instance_id")
+
+    is_done=$(ssh -i ~/vast_tmp/sshkey "$ssh_url" "ls | grep jobs_done | wc -l")
+    runner_id=$(ssh -i ~/vast_tmp/sshkey "$ssh_url" 'echo $MY_RUNNER_ID')
+
+    echo "IS_DONE"
+    echo "$is_done"
+    if [ "$is_done" == "1" ]; then
+      mkdir -p "cloud_results/$runner_id"
 
 
+
+      user=$(echo $ssh_url | awk -F'[/:@]' '{print $4}')
+      host=$(echo $ssh_url | awk -F'[/:@]' '{print $5}')
+      port=$(echo $ssh_url | awk -F'[/:@]' '{print $6}')
+
+      scp -i ~/vast_tmp/sshkey -P "$port" "$user@$host:/root/results.tar.gz" "./cloud_results/$runner_id"
+      vastai stop instance "$instance_id"
+    else
+      not_all_done=is_done
+    fi
+  done
+  sleep 3000
+done
