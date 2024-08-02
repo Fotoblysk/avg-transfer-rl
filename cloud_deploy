@@ -1,47 +1,52 @@
 #!/bin/bash
-export query_result=$(vastai search offers 'compute_cap > 20 reliability > 0.99' -o 'dph+' -d)
-echo "Price: "
-echo $(echo "$query_result" | awk 'NR==2 {print $10}')
-echo "Id: "
-export I_ID=$(echo "$query_result" | awk 'NR==2 {print $1}')
-echo "$I_ID"
 
+env_group=0
+exp_set=0
 
-vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 16 --ssh --direct --env '-e MY_RUNNER_ID=2' --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";
-
-not_all_done="1"
-
-while [ "$not_all_done" != "0" ]; do
-  echo 'Periodic check for done instances'
-  not_all_done="0"
-  export INSTANCES_RAW=$(vastai show instances)
-  instances_n=$(echo "$INSTANCES_RAW" | wc -l)
-  for i in $(seq 2 $instances_n)
-  do
-    echo "Current number: $i"
-    instance_id=$(echo "$INSTANCES_RAW" | awk 'NR=='"$i"' {print $1}')
-    echo "Instance id: $instance_id"
-    ssh_url=$(vastai ssh-url "$instance_id")
-
-    is_done=$(ssh -i ~/vast_tmp/sshkey "$ssh_url" "ls | grep jobs_done | wc -l")
-    runner_id=$(ssh -i ~/vast_tmp/sshkey "$ssh_url" 'echo $MY_RUNNER_ID')
-
-    echo "IS_DONE"
-    echo "$is_done"
-    if [ "$is_done" == "1" ]; then
-      mkdir -p "cloud_results/$runner_id"
-
-
-
-      user=$(echo $ssh_url | awk -F'[/:@]' '{print $4}')
-      host=$(echo $ssh_url | awk -F'[/:@]' '{print $5}')
-      port=$(echo $ssh_url | awk -F'[/:@]' '{print $6}')
-
-      scp -i ~/vast_tmp/sshkey -P "$port" "$user@$host:/root/results.tar.gz" "./cloud_results/$runner_id"
-      vastai stop instance "$instance_id"
+min() {
+    if [ "$1" -lt "$2" ]; then
+        echo "$1"
     else
-      not_all_done=is_done
+        echo "$2"
     fi
+}
+
+tasks_per_instance=2
+TASKS_NUMBER=14
+
+max_runner_id=$((TASKS_NUMBER / tasks_per_instance))
+
+echo $max_runner_id
+AVG_MAX=2
+for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
+  for ((runner_id=0; runner_id<=max_runner_id; runner_id++)); do
+    launched=0
+    while [ "$launched" != "1" ]; do
+      export query_result=$(vastai search offers 'reliability > 0.98 dph < 0.2 cpu_cores > 1' -o 'dph+' -d)
+      echo "Price: "
+      echo $(echo "$query_result" | awk 'NR==2 {print $10}')
+      echo "Id: "
+      export I_ID=$(echo "$query_result" | awk 'NR==2 {print $1}')
+      echo "$I_ID"
+
+
+
+
+
+      min_task=$((tasks_per_instance * runner_id))
+      max_task=$(((1+runner_id) * tasks_per_instance))
+
+      max_task=$(min "$TASKS_NUMBER" "$max_task")
+      if [ "$min_task" != "$max_task" ]; then
+        echo "Launching instance $runner_id, $avg_id, $min_task, $max_task"
+        result=$(vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 16 --ssh --direct --env "-e MY_RUNNER_ID=$runner_id -e MIN_TASK=$min_task -e MAX_TASK=$max_task -e ENV_GROUP=$env_group -e EXP_SET=$exp_set -e AVG_ID=$avg_id" --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";)
+        echo "$result"
+        launched=$(echo $result | grep "'success': True" | wc -l)
+        echo "Launched: $launched"
+      fi
+      sleep 1
+    done
   done
-  sleep 3000
 done
+
+echo "Launched"

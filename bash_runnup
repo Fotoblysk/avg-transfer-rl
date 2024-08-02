@@ -2,10 +2,9 @@
 
 start_time=$(date +%s)
 # Variables
-number_of_processes=1
-#max_number=37
-#max_number=14
-max_number=6
+number_of_processes=2
+min_number=$MIN_TASK
+max_number=$MAX_TASK
 
 # Function to run python script with a subset of numbers
 run_python_script() {
@@ -27,20 +26,24 @@ cleanup() {
 trap cleanup SIGINT
 
 # Calculate the step size
-step_size=$((max_number / number_of_processes))
+step_size=$(((max_number - min_number) / number_of_processes))
+
+if [ "$step_size" == "0" ]; then
+  step_size=1
+fi
 
 # Array to store process IDs
 pids=()
 
 # Loop through the numbers and run the script in parallel
-for ((i=0; i<max_number; i+=step_size)); do
+for ((i=min_number; i<max_number; i+=step_size)); do
     args=()
     for ((j=0; j<step_size; j++)); do
         if ((i + j < max_number)); then
             args+=($((i + j)))
         fi
     done
-    echo "a"
+    echo "running"
     echo "${args[@]}"
     run_python_script "${args[@]}" &
     pids+=($!)  # Store the process ID
@@ -54,62 +57,3 @@ elapsed=$((end_time - start_time))
 
 echo "Elapsed time 1 thread: $elapsed"
 echo "$elapsed" > finish_date
-
-############################################################################33
-
-#!/bin/bash
-
-start_time=$(date +%s)
-# Variables
-number_of_processes=3
-#max_number=37
-#max_number=14
-max_number=6
-
-# Function to run python script with a subset of numbers
-run_python_script() {
-    python3 main.py "$@"
-}
-
-# Function to handle SIGINT (Ctrl-C)
-cleanup() {
-    echo "Terminating all background processes..."
-    # Kill all background processes
-    for pid in "${pids[@]}"; do
-        kill "$pid" 2>/dev/null
-    done
-    wait
-    exit 1
-}
-
-# Set up trap to catch SIGINT and call cleanup
-trap cleanup SIGINT
-
-# Calculate the step size
-step_size=$((max_number / number_of_processes))
-
-# Array to store process IDs
-pids=()
-
-# Loop through the numbers and run the script in parallel
-for ((i=0; i<max_number; i+=step_size)); do
-    args=()
-    for ((j=0; j<step_size; j++)); do
-        if ((i + j < max_number)); then
-            args+=($((i + j)))
-        fi
-    done
-    echo "a"
-    echo "${args[@]}"
-    run_python_script "${args[@]}" &
-    pids+=($!)  # Store the process ID
-done
-
-# Wait for all background processes to finish
-wait
-end_time=$(date +%s)
-
-elapsed=$((end_time - start_time))
-
-echo "Elapsed time 3 thread: $elapsed"
-echo "$elapsed" > finish_date3
