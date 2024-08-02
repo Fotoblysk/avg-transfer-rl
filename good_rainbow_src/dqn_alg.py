@@ -8,9 +8,17 @@ import torch.nn as nn
 import gymnasium as gym
 
 import matplotlib
+import torch.nn.functional as F
+
+from good_rainbow_src.utils import downsample_data
+
+matplotlib.pyplot.rcParams['agg.path.chunksize'] = 200000
 
 matplotlib.use('Agg')
+matplotlib.pyplot.rcParams['agg.path.chunksize'] = 200000
+
 from matplotlib import pyplot as plt
+plt.rcParams['agg.path.chunksize'] = 200000
 
 from torch import optim
 from typing import Dict, List, Tuple
@@ -19,6 +27,7 @@ from torch.nn.utils import clip_grad_norm_
 
 from good_rainbow_src.memory_replay import PrioritizedReplayBuffer, ReplayBuffer
 from good_rainbow_src.network_models import Network
+
 
 class FrozenClass(object):
     __isfrozen = False
@@ -97,9 +106,9 @@ class DQNAgent:
             conv_space: bool = False,
             min_memory_size: int = 80000,
             learning_interval: int = 4,  # is for 32 batch_size
-            epsilon_decay: float = 1 / 1000000,  # min after 1M epizodes
-            max_epsilon: float = 0,
-            min_epsilon: float = 0.0,
+            epsilon_decay: float = 1 / 200000,  # min after 1M epizodes
+            max_epsilon: float = 1,
+            min_epsilon: float = 0.001,
             correct_dims: bool = False,
             reward_clip=None,
             reward_scale=None,
@@ -137,7 +146,13 @@ class DQNAgent:
         self.min_memory_size = min_memory_size
         self.learning_interval = learning_interval
         self.conv_space = conv_space
-        obs_dim = env.observation_space.shape
+        if env.observation_space.shape == ():
+            obs_dim = 1 # raw int as input for state shape, use one-hot wrapper if want
+        else:
+            obs_dim = env.observation_space.shape
+        print("DIMS:")
+        print(obs_dim)
+        #print(env.observation_space)
 
         if len(obs_dim) > 1 and correct_dims:
             obs_dim = (obs_dim[2], obs_dim[0], obs_dim[1])
@@ -179,9 +194,12 @@ class DQNAgent:
         self.v_min = v_min
         self.v_max = v_max
         self.atom_size = atom_size
-        self.support = torch.linspace(
-            self.v_min, self.v_max, self.atom_size
-        ).to(self.device)
+        if atom_size is not None:
+            self.support = torch.linspace(
+                self.v_min, self.v_max, self.atom_size
+            ).to(self.device)
+        else:
+            self.support = None
 
         # networks: dqn, dqn_target
         self.dqn = Network(
@@ -203,7 +221,7 @@ class DQNAgent:
         # ploting utils
         self.target_update_eps = []
         self.target_update_steps = []
-        _, self.axes = plt.subplots(1, 4, figsize=(20, 5))
+        self.fig, self.axes = plt.subplots(1, 4, figsize=(20, 5))
 
         self.teacher_network = None
         # guided network experiment
@@ -251,7 +269,7 @@ class DQNAgent:
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.float64, bool]:
         """Take an action and return the response of the env."""
-        next_state, reward, terminated, truncated, _ = self.env.step(action)
+        next_state, reward, terminated, truncated, _ = self.env.step(int(action)) # TODO this is just workaround for frozen lake
         if self.reward_clip is not None:
             reward = min(max(reward, self.reward_clip[0]), self.reward_clip[1])
 
@@ -391,7 +409,7 @@ class DQNAgent:
             self._plot(frame_idx, self.training_state.scores, self.training_state.losses, self.training_state.ep_lens,
                        self.training_state.action_histograms)  # ,guide_epsilons)  # add action distribution, and when plotting we can add noise param avg and variance
 
-    def train(self, num_frames: int, plotting_interval: int = 10000, testing_function=None):
+    def train(self, num_frames: int, plotting_interval: int = 1000000, testing_function=None):
         """Train the agent."""
         self.train_init()
         for frame_idx in range(1, num_frames + 1):
@@ -434,46 +452,58 @@ class DQNAgent:
         device = self.device  # for shortening the following lines
         state = torch.FloatTensor(np.stack(samples["obs"])).to(device)
         next_state = torch.FloatTensor(np.stack(samples["next_obs"])).to(device)
-        action = torch.LongTensor(samples["acts"]).to(device)
+        if self.atom_size is not None:
+            action = torch.LongTensor(samples["acts"]).to(device)
+        else:
+            action = torch.LongTensor(samples["acts"].reshape(-1, 1)).to(device)
         reward = torch.FloatTensor(samples["rews"].reshape(-1, 1)).to(device)
         done = torch.FloatTensor(samples["done"].reshape(-1, 1)).to(device)
 
         # Categorical DQN algorithm
-        delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
+        if self.atom_size is not None:
+            delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
+            with torch.no_grad():
+                # Double DQN
+                next_action = self.dqn(next_state).argmax(1)
+                next_dist = self.dqn_target.dist(next_state)
+                next_dist = next_dist[range(self.batch_size), next_action]
 
-        with torch.no_grad():
-            # Double DQN
-            next_action = self.dqn(next_state).argmax(1)
-            next_dist = self.dqn_target.dist(next_state)
-            next_dist = next_dist[range(self.batch_size), next_action]
+                t_z = reward + (1 - done) * gamma * self.support
+                t_z = t_z.clamp(min=self.v_min, max=self.v_max)
+                b = (t_z - self.v_min) / delta_z
+                l = b.floor().long()
+                u = b.ceil().long()
 
-            t_z = reward + (1 - done) * gamma * self.support
-            t_z = t_z.clamp(min=self.v_min, max=self.v_max)
-            b = (t_z - self.v_min) / delta_z
-            l = b.floor().long()
-            u = b.ceil().long()
+                offset = (
+                    torch.linspace(
+                        0, (self.batch_size - 1) * self.atom_size, self.batch_size
+                    ).long()
+                    .unsqueeze(1)
+                    .expand(self.batch_size, self.atom_size)
+                    .to(self.device)
+                )
 
-            offset = (
-                torch.linspace(
-                    0, (self.batch_size - 1) * self.atom_size, self.batch_size
-                ).long()
-                .unsqueeze(1)
-                .expand(self.batch_size, self.atom_size)
-                .to(self.device)
-            )
+                proj_dist = torch.zeros(next_dist.size(), device=self.device)
+                proj_dist.view(-1).index_add_(
+                    0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1)
+                )
+                proj_dist.view(-1).index_add_(
+                    0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1)
+                )
 
-            proj_dist = torch.zeros(next_dist.size(), device=self.device)
-            proj_dist.view(-1).index_add_(
-                0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1)
-            )
-            proj_dist.view(-1).index_add_(
-                0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1)
-            )
+            dist = self.dqn.dist(state)
+            log_p = torch.log(dist[range(self.batch_size), action])
+            elementwise_loss = -(proj_dist * log_p).sum(1)
+        else:
+            curr_q_value = self.dqn(state).gather(1, action)
+            next_q_value = self.dqn_target(
+                next_state
+            ).max(dim=1, keepdim=True)[0].detach()
+            mask = 1 - done
+            target = (reward + self.gamma * next_q_value * mask).to(self.device)
 
-        dist = self.dqn.dist(state)
-        log_p = torch.log(dist[range(self.batch_size), action])
-        elementwise_loss = -(proj_dist * log_p).sum(1)
-
+            # calculate element-wise dqn loss
+            elementwise_loss = F.smooth_l1_loss(curr_q_value, target, reduction="none")
         return elementwise_loss
 
     def _target_hard_update(self):
@@ -484,29 +514,29 @@ class DQNAgent:
         if self.axes is not None:
             def plot_trends(ax_index, data):
                 cumsum_vec = np.cumsum(np.insert(data, 0, 0))
-                ma_vec_50 = (cumsum_vec[50:] - cumsum_vec[:-50]) / 50
-                ma_vec_100 = (cumsum_vec[100:] - cumsum_vec[:-100]) / 100
+                #ma_vec_50 = (cumsum_vec[50:] - cumsum_vec[:-50]) / 50
+                #ma_vec_100 = (cumsum_vec[100:] - cumsum_vec[:-100]) / 100
                 ma_vec_200 = (cumsum_vec[200:] - cumsum_vec[:-200]) / 200
-                if len(ma_vec_50) > 1:
-                    self.axes[ax_index].plot(np.pad(ma_vec_50, (len(data) - len(ma_vec_50), 0), 'edge'), color='y')
-                if len(ma_vec_100) > 1:
-                    self.axes[ax_index].plot(np.pad(ma_vec_100, (len(data) - len(ma_vec_100), 0), 'edge'), color='r')
+                #if len(ma_vec_50) > 1:
+                #    self.axes[ax_index].plot(np.pad(ma_vec_50, (len(data) - len(ma_vec_50), 0), 'edge'), color='y')
+                #if len(ma_vec_100) > 1:
+                #    self.axes[ax_index].plot(np.pad(ma_vec_100, (len(data) - len(ma_vec_100), 0), 'edge'), color='r')
                 if len(ma_vec_200) > 1:
                     self.axes[ax_index].plot(np.pad(ma_vec_200, (len(data) - len(ma_vec_200), 0), 'edge'), color='k')
 
             self.axes[0].clear()
             self.axes[0].set_title('frame %s. reward: %s' % (frame_idx, np.mean(rewards[-10:])))
 
-            for target_update_ep in self.target_update_eps:
-                self.axes[0].axvline(x=target_update_ep, color='g')
+            #for target_update_ep in self.target_update_eps:
+            #    self.axes[0].axvline(x=target_update_ep, color='g')
             self.axes[0].plot(rewards)
             plot_trends(0, rewards)
 
             self.axes[1].clear()
             self.axes[1].set_title('loss')
 
-            for target_update_step in self.target_update_steps:
-                self.axes[1].axvline(x=target_update_step, color='g')
+            #for target_update_step in self.target_update_steps:
+            #    self.axes[1].axvline(x=target_update_step, color='g')
 
             self.axes[1].plot(losses)
             plot_trends(1, losses)
@@ -514,8 +544,8 @@ class DQNAgent:
             self.axes[2].clear()
             self.axes[2].set_title('Ep len')
 
-            for target_update_ep in self.target_update_eps:
-                self.axes[2].axvline(x=target_update_ep, color='g')
+            #for target_update_ep in self.target_update_eps:
+            #    self.axes[2].axvline(x=target_update_ep, color='g')
 
             self.axes[2].plot(ep_lens)
             plot_trends(2, ep_lens)
@@ -526,8 +556,8 @@ class DQNAgent:
             # for target_update_ep in self.target_update_eps:
             #    self.axes[3].axvline(x=target_update_ep, color='g')
 
-            action_histograms_tmp = np.array(action_histograms)
-            self.axes[3].plot(action_histograms_tmp)
+            action_histograms_tmp, action_idx = downsample_data(np.array(action_histograms),100000)
+            self.axes[3].plot(action_idx, action_histograms_tmp)
             for i in range(action_histograms_tmp.shape[1]):
                 if 1 + i < action_histograms_tmp.shape[1]:
                     self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i],
@@ -537,7 +567,7 @@ class DQNAgent:
 
             # plt.draw()
             if self.save_fig is not None:
-                plt.savefig(self.save_fig, dpi=300)
+                self.fig.savefig(self.save_fig)
             # plt.pause(0.01)
 
             # Guided network experiment

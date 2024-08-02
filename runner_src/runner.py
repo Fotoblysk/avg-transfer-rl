@@ -1,16 +1,17 @@
 import os
 import random
 import threading
+from minigrid.wrappers import FlatObsWrapper, DictObservationSpaceWrapper
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from gymnasium.wrappers import FrameStack, ResizeObservation, AtariPreprocessing
+from gymnasium.wrappers import FrameStack, ResizeObservation, AtariPreprocessing, FlattenObservation
 
 from good_rainbow_src.dqn_alg import DQNAgent
 from good_rainbow_src.memory_replay import ReplayBuffer
-from good_rainbow_src.wrappers import SkipWrapper
+from good_rainbow_src.wrappers import SkipWrapper, DiscreteToBoxWrapper
 from gymnasium.wrappers.gray_scale_observation import GrayScaleObservation
 
 
@@ -44,6 +45,7 @@ class Runner():
             conv_space = False
 
         env = gym.make(**env_data["env_kwargs"], render_mode="rgb_array")
+        print("inittt")
         if "preprocess" in env_data:
             if env_data["preprocess"].get("atari") is True:  # orginal settings
                 print("atari")
@@ -61,16 +63,37 @@ class Runner():
                     print("res")
                     env = ResizeObservation(env, env_data["preprocess"].get("resize_obs", None))
 
+            if env_data["preprocess"].get("one_hot_obs") == True:
+                print("one_hot_obs")
+                env = DiscreteToBoxWrapper(env)
+
+            if env_data["preprocess"].get("minigrid-flat") == True:
+                print("minigrid-flat")
+                env = FlatObsWrapper(env)
+            if env_data["preprocess"].get("minigrid-dict") == True:
+                print("minigrid-dict")
+                env = DictObservationSpaceWrapper(env)
+
+            if env_data["preprocess"].get("minigrid-dict-flat") == True:
+                print("minigrid-dict")
+                env = DictObservationSpaceWrapper(env, max_words_in_mission=19)
+                env = FlattenObservation(env)
+
             if env_data["preprocess"].get("frame_stack", 1) != 1:
                 print("stack")
                 lz4_compress = True
                 env = FrameStack(env, num_stack=env_data["preprocess"].get("frame_stack", 1), lz4_compress=lz4_compress)
 
+            if env_data["preprocess"].get("flatten") == True:
+                print("flatten")
+                env = FlattenObservation(env)
+
             if env_data["preprocess"].get("frameskip", 1) != 1:
                 print("skip")
                 env = SkipWrapper(env, frame_skip=env_data["preprocess"].get("frameskip", 1))
 
-        print(f'Grain size: {(env_data["meta"]["v_max"] - env_data["meta"]["v_min"]) / env_data["meta"]["atom_size"]}')
+        if env_data["meta"]["atom_size"] is not None:
+            print(f'Grain size: {(env_data["meta"]["v_max"] - env_data["meta"]["v_min"]) / env_data["meta"]["atom_size"]}')
 
         print(config)
         init_seed(config["params"]["seed"])
@@ -93,7 +116,7 @@ class Runner():
 
         def continuous_testing(epizode):
             # this is param
-            testing_ep_interval = 50
+            testing_ep_interval = 1000
             if epizode % testing_ep_interval == 0:
                 self.agent.test(
                     video_folder=f'results/{self.name}/videos', video_prefix=f'rl-video-ep-{epizode}'
@@ -104,12 +127,16 @@ class Runner():
                          plotting_interval=self.config["plot"]["interval"])
         self.running = False
 
-    def run(self):
+    def run(self,console_run=False):
         if not self.running:
-            self.t = threading.Thread(target=self.run_t)
-            self.running = True
-            self.t.start()
-            print('Agent started')
+            if console_run:
+                self.run_t()
+            else:
+                self.t = threading.Thread(target=self.run_t) # we can use process in worst case
+
+                self.running = True
+                self.t.start()
+                print('Agent started')
         else:
             print('Agent is running already')
 

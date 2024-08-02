@@ -4,7 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from good_rainbow_src.layers import NoisyLinear
 
-FC_SIZE = 512
+#FC_SIZE = 512
+FC_SIZE = 256
 class Network(nn.Module):
     def __init__(
             self,
@@ -53,11 +54,16 @@ class Network(nn.Module):
 
         # set advantage layer
         self.advantage_hidden_layer = NoisyLinear(FC_SIZE, FC_SIZE) # TODO it might be helpful to lessen noise to 0.1
-        self.advantage_layer = NoisyLinear(FC_SIZE, out_dim * atom_size)
+        self.value_hidden_layer = NoisyLinear(FC_SIZE, FC_SIZE)
+
+        if self.atom_size is not None:
+            self.advantage_layer = NoisyLinear(FC_SIZE, out_dim * atom_size)
+            self.value_layer = NoisyLinear(FC_SIZE, atom_size)
+        else:
+            self.advantage_layer = NoisyLinear(FC_SIZE, out_dim)
+            self.value_layer = NoisyLinear(FC_SIZE, 1)
 
         # set value layer
-        self.value_hidden_layer = NoisyLinear(FC_SIZE, FC_SIZE)
-        self.value_layer = NoisyLinear(FC_SIZE, atom_size)
     def _get_conv_output(self, shape):
         with torch.no_grad():
             input = torch.zeros(1, *shape)
@@ -67,7 +73,10 @@ class Network(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward method implementation."""
         dist = self.dist(x)
-        q = torch.sum(dist * self.support, dim=2)
+        if self.atom_size is not None:
+            q = torch.sum(dist * self.support, dim=2)
+        else:
+            q = dist
 
         return q
 
@@ -85,16 +94,23 @@ class Network(nn.Module):
         adv_hid = F.leaky_relu(self.advantage_hidden_layer(feature))
         val_hid = F.leaky_relu(self.value_hidden_layer(feature))
 
-        advantage = self.advantage_layer(adv_hid).view(
-            -1, self.out_dim, self.atom_size
-        )
-        value = self.value_layer(val_hid).view(-1, 1, self.atom_size)
-        q_atoms = value + advantage - advantage.mean(dim=1, keepdim=True)
+        if self.atom_size is not None:
+            advantage = self.advantage_layer(adv_hid).view(
+                -1, self.out_dim, self.atom_size
+            )
+            value = self.value_layer(val_hid).view(-1, 1, self.atom_size)
 
-        dist = F.softmax(q_atoms, dim=-1)
-        dist = dist.clamp(min=1e-3)  # for avoiding nans
+            q_atoms = value + advantage - advantage.mean(dim=1, keepdim=True)
 
-        return dist
+            dist = F.softmax(q_atoms, dim=-1)
+            dist = dist.clamp(min=1e-3)  # for avoiding nans
+            return dist
+        else:
+            advantage = self.advantage_layer(adv_hid)
+            value = self.value_layer(val_hid)
+            q = value + advantage - advantage.mean(dim=-1, keepdim=True)
+            return q
+
 
     def reset_noise(self):
         """Reset all noisy layers."""

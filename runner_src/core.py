@@ -1,3 +1,6 @@
+from copy import deepcopy
+
+from good_rainbow_src.utils import merge_dicts
 from runner_src.runner import *
 from datetime import datetime
 
@@ -57,6 +60,10 @@ class Core():
                     '=============================\n'
                 )
 
+    def run_from_console(self, experiment_plan):
+        for config_name, additional_settings in experiment_plan:
+            print("running")
+            self.run(config_name, additional_settings, console_run=True)
 
     def list_configurations(self):
         print('Index | Config name\n--------------------------')
@@ -70,17 +77,29 @@ class Core():
             print(list(self.configs.items())[int(config_name)][1])
 
 
-    def run(self, config_name):
+    def run(self, config_name, additional_settings=None, console_run=False):
         c, config_name = select(self.configs, config_name)
 
         ts = datetime.now().strftime('%d-%m-%Y_%H-%M')
-        instance_name = input(f'Instance name [{config_name}_{ts}]: ')
+        default_name = f'{config_name}_{ts}'
+        if not console_run:
+            instance_name = input(f'Instance name [{config_name}_{ts}]: ')
+        else:
+            instance_name = default_name
+
         if instance_name == '':
-            instance_name = f'{config_name}_{ts}'
+            instance_name = default_name
 
         print(f'Running "{instance_name}" ({config_name})...')
-        r = Runner(instance_name, self.configs[config_name])
-        r.run()
+
+        if additional_settings is None:
+            additional_settings = {}
+
+        config_to_run = deepcopy(self.configs[config_name])
+
+        merge_dicts(config_to_run, additional_settings)
+        r = Runner(instance_name, config_to_run)
+        r.run(console_run=console_run)
         self.running[instance_name] = r
     
     def list_running(self):
