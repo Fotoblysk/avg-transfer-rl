@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # Variables
-number_of_processes=2
+number_of_processes=1
 #max_number=37
-max_number=14
+#max_number=14
+max_number=6
 
 # Function to run python script with a subset of numbers
 run_python_script() {
@@ -46,3 +47,5 @@ done
 
 # Wait for all background processes to finish
 wait
+echo `date`
+date > finish_date

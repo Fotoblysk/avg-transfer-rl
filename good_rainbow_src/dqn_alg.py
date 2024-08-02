@@ -106,7 +106,7 @@ class DQNAgent:
             conv_space: bool = False,
             min_memory_size: int = 80000,
             learning_interval: int = 4,  # is for 32 batch_size
-            epsilon_decay: float = 1 / 800000,  # min after 1M epizodes
+            epsilon_decay: float = 1 / 100000,  # min after 1M epizodes
             max_epsilon: float = 1,
             min_epsilon: float = 0.001,
             correct_dims: bool = False,
