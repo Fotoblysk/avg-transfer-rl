@@ -26,7 +26,7 @@ min() {
 }
 
 tasks_per_instance=2
-TASKS_NUMBER=32
+TASKS_NUMBER=36
 
 max_runner_id=$((TASKS_NUMBER / tasks_per_instance))
 
