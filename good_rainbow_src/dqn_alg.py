@@ -1,3 +1,4 @@
+import csv
 import os
 import random
 import sys
@@ -12,13 +13,9 @@ import torch.nn.functional as F
 
 from good_rainbow_src.utils import downsample_data
 
-matplotlib.pyplot.rcParams['agg.path.chunksize'] = 200000
 
-matplotlib.use('Agg')
-matplotlib.pyplot.rcParams['agg.path.chunksize'] = 200000
 
-from matplotlib import pyplot as plt
-plt.rcParams['agg.path.chunksize'] = 200000
+
 
 from torch import optim
 from typing import Dict, List, Tuple
@@ -31,9 +28,10 @@ from good_rainbow_src.network_models import Network
 
 class FrozenClass(object):
     __isfrozen = False
+
     def __setattr__(self, key, value):
         if self.__isfrozen and not hasattr(self, key):
-            raise TypeError( "%r is a frozen class" % self )
+            raise TypeError("%r is a frozen class" % self)
         object.__setattr__(self, key, value)
 
     def _freeze(self):
@@ -43,24 +41,21 @@ class FrozenClass(object):
 class TrainingState(FrozenClass):
     def __init__(self, env, conv_space, correct_dims, action_dim):
         self.is_test = False
-        self.stop = False
 
         self.state, _ = env.reset()  # seed=self.seed)
         if conv_space is True and correct_dims:
             self.state = self.state.transpose(2, 0, 1)
 
         self.update_cnt = 0
+        self.ep_id = 0
         # TODO we need class for that
         self.losses = []
-        self.scores = []
-        self.ep_lens = []
-        self.action_histograms = []
-        self.guide_epsilons = []
         self.score = 0
         self.last_frame_ep_end = 1
         self.action_hist = np.zeros(action_dim)
         self.guide_epsilon = 1
-        self._freeze() # no new attributes after this point.
+        self._freeze()  # no new attributes after this point.
+
 
 class DQNAgent:
     """DQN Agent interacting with environment.
@@ -112,7 +107,7 @@ class DQNAgent:
             correct_dims: bool = False,
             reward_clip=None,
             reward_scale=None,
-            save_fig=None,
+            save_stats_path=None,
             # guided network experiment
             guided_network=None
     ):
@@ -134,7 +129,7 @@ class DQNAgent:
             n_step (int): step number to calculate n-step td error
         """
 
-        self.save_fig = save_fig
+        self.save_stats_path = save_stats_path
         self.reward_scale = reward_scale
         self.reward_clip = reward_clip
         self.correct_dims = correct_dims
@@ -147,12 +142,11 @@ class DQNAgent:
         self.learning_interval = learning_interval
         self.conv_space = conv_space
         if env.observation_space.shape == ():
-            obs_dim = 1 # raw int as input for state shape, use one-hot wrapper if want
+            obs_dim = 1  # raw int as input for state shape, use one-hot wrapper if want
         else:
             obs_dim = env.observation_space.shape
         print("DIMS:")
         print(obs_dim)
-        #print(env.observation_space)
 
         if len(obs_dim) > 1 and correct_dims:
             obs_dim = (obs_dim[2], obs_dim[0], obs_dim[1])
@@ -171,7 +165,6 @@ class DQNAgent:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         print(self.device)
-
 
         # PER
         # memory for 1-step Learning
@@ -217,11 +210,8 @@ class DQNAgent:
         # transition to store in memory
         self.transition = list()
 
-
         # ploting utils
-        self.target_update_eps = []
-        self.target_update_steps = []
-        self.fig, self.axes = plt.subplots(1, 4, figsize=(20, 5))
+        self.target_update_frames = []
 
         self.teacher_network = None
         # guided network experiment
@@ -236,7 +226,22 @@ class DQNAgent:
             self.end_avg_reward = sys.float_info.min / 100
         # end of guided network experiment
         self.training_state = TrainingState(self.env, self.conv_space, self.correct_dims, self.action_dim)
-        self.training_state.stop = False
+
+        self.ep_stats_labels = ['frame_idx', 'score', 'disc_score', 'ep_len', 'action_hist',
+                                'models_usage_hist']  # TODO finish when more
+        self.loss_stats_labels = ['frame_idx', 'loss_value']
+
+        with open(f"{self.save_stats_path}/train_ep_data.csv", mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.ep_stats_labels)
+            writer.writeheader()
+
+        with open(f"{self.save_stats_path}/train_loss_data.csv", mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.loss_stats_labels)
+            writer.writeheader()
+
+        with open(f"{self.save_stats_path}/target_updates_frames.csv", mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=['frame_idx'])
+            writer.writeheader()
 
     def select_action(self, state: np.ndarray, force_epsilon=None, network=None) -> np.ndarray:
         if network is None:
@@ -269,7 +274,8 @@ class DQNAgent:
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.float64, bool]:
         """Take an action and return the response of the env."""
-        next_state, reward, terminated, truncated, _ = self.env.step(int(action)) # TODO this is just workaround for frozen lake
+        next_state, reward, terminated, truncated, _ = self.env.step(
+            int(action))  # TODO this is just workaround for frozen lake
         if self.reward_clip is not None:
             reward = min(max(reward, self.reward_clip[0]), self.reward_clip[1])
 
@@ -344,7 +350,54 @@ class DQNAgent:
     def train_init(self):
         self.training_state = TrainingState(self.env, self.conv_space, self.correct_dims, self.action_dim)
 
-    def train_step(self, frame_idx, num_frames: int, plotting_interval: int = 10000, testing_function=None):
+    def save_stats(self, frame_idx):
+        # Prepare data
+        self.training_state.action_hist = [i / (sum(self.training_state.action_hist)) for i in
+                                           self.training_state.action_hist]
+        self.training_state.action_hist = np.flip(np.cumsum(np.flip(self.training_state.action_hist)))
+
+        # Save data
+        with open(f"{self.save_stats_path}/train_ep_data.csv", mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.ep_stats_labels)
+            # frame idx
+            writer.writerow({
+                'frame_idx': frame_idx,
+                'score': self.training_state.score,
+                'disc_score': self.training_state.score,  # TODO fix it g_score
+                'ep_len': frame_idx - self.training_state.last_frame_ep_end,
+                'action_hist': self.training_state.action_hist,
+                'models_usage_hist': self.training_state.guide_epsilon
+            })
+
+        with open(f"{self.save_stats_path}/train_loss_data.csv", mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.loss_stats_labels)
+            for i, l in self.training_state.losses:
+                writer.writerow({
+                    'frame_idx': i,
+                    'loss_value': l,
+                })
+            self.training_state.losses = []
+
+        with open(f"{self.save_stats_path}/target_updates_frames.csv", mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=['frame_idx'])
+            for i in self.target_update_frames:
+                writer.writerow({
+                    'frame_idx': i,
+                })
+            self.target_update_frames = []
+
+
+    def reset_interep_stats(self, frame_idx):
+        self.training_state.score = 0
+        self.training_state.last_frame_ep_end = frame_idx
+        self.training_state.action_hist = np.zeros(self.action_dim)
+        self.end_avg_reward = 0 # fixme #sum(self.training_state.scores[-10:]) / 10
+
+    def update_stats(self, frame_idx):
+        self.save_stats(frame_idx)
+        self.reset_interep_stats(frame_idx)
+
+    def train_step(self, frame_idx, num_frames: int, testing_function=None):
         if self.teacher_network is not None and self.end_avg_reward < self.teacher_avg_reward:
             self.training_state.guide_epsilon = min(max((self.teacher_avg_reward - self.end_avg_reward) / (
                     self.teacher_avg_reward - self.init_avg_reward), 0), 1)
@@ -352,7 +405,8 @@ class DQNAgent:
                 teacher = self.teacher_network
                 action = self.select_action(self.training_state.state, network=teacher)
             else:
-                action = self.select_action(self.training_state.state, network=self.dqn, force_epsilon=0.75 * self.training_state.guide_epsilon)
+                action = self.select_action(self.training_state.state, network=self.dqn,
+                                            force_epsilon=0.75 * self.training_state.guide_epsilon)
         else:
             action = self.select_action(self.training_state.state)
         self.training_state.action_hist[action] += 1
@@ -376,46 +430,30 @@ class DQNAgent:
         if done:
             # FIXME need to test before reset god knows why
             if testing_function is not None and len(self.memory) >= self.min_memory_size:  # we dont want random
-                testing_function(len(self.training_state.scores))
+                testing_function(self.training_state.ep_id)
             self.training_state.state, _ = self.env.reset()  # seed=self.seed)# TODO ensure that is deterministic commenting because of all same env
             if self.conv_space is True and self.correct_dims:
                 self.training_state.state = self.training_state.state.transpose(2, 0, 1)
-            self.training_state.scores.append(self.training_state.score)
-            self.training_state.ep_lens.append(frame_idx - self.training_state.last_frame_ep_end)
-            self.training_state.action_hist = [i / (sum(self.training_state.action_hist)) for i in self.training_state.action_hist]
-            self.training_state.action_hist = np.flip(np.cumsum(np.flip(self.training_state.action_hist)))
-            self.training_state.action_histograms.append(self.training_state.action_hist)
-            self.training_state.guide_epsilons.append(self.training_state.guide_epsilon)
-            self.training_state.score = 0
-            self.training_state.last_frame_ep_end = frame_idx
-            self.training_state.action_hist = np.zeros(self.action_dim)
-            self.end_avg_reward = sum(self.training_state.scores[-10:]) / 10
 
+            self.update_stats(frame_idx)
+            self.training_state.ep_id += 1
         # if training is ready
         if len(self.memory) >= self.batch_size and len(
                 self.memory) >= self.min_memory_size and frame_idx % self.learning_interval == 0:
             loss = self.update_model()
-            self.training_state.losses.append(loss)
+            self.training_state.losses.append((frame_idx, loss))
             self.training_state.update_cnt += 1
 
             # if hard update is needed
             if self.training_state.update_cnt % self.target_update == 0:
-                self.target_update_steps.append(len(self.training_state.losses))
-                self.target_update_eps.append(len(self.training_state.scores))
+                self.target_update_frames.append(frame_idx)
                 self._target_hard_update()
-
-        # plotting
-        if frame_idx % plotting_interval == 0:
-            self._plot(frame_idx, self.training_state.scores, self.training_state.losses, self.training_state.ep_lens,
-                       self.training_state.action_histograms)  # ,guide_epsilons)  # add action distribution, and when plotting we can add noise param avg and variance
 
     def train(self, num_frames: int, plotting_interval: int = 1000000, testing_function=None):
         """Train the agent."""
         self.train_init()
         for frame_idx in range(1, num_frames + 1):
-            self.train_step(frame_idx, num_frames, plotting_interval, testing_function)
-            if self.training_state.stop and frame_idx % plotting_interval == 0:
-                break  # TODO breaking not workin after moving
+            self.train_step(frame_idx, num_frames, testing_function)
         self.env.close()
 
     # TODO we dont really need test for recording during learning as RecordVideo enables ep_number trigger
@@ -509,91 +547,3 @@ class DQNAgent:
     def _target_hard_update(self):
         """Hard update: target <- local."""
         self.dqn_target.load_state_dict(self.dqn.state_dict())
-
-    def _plot(self, frame_idx, rewards, losses, ep_lens, action_histograms):
-        if self.axes is not None:
-            def plot_trends(ax_index, data):
-                cumsum_vec = np.cumsum(np.insert(data, 0, 0))
-                #ma_vec_50 = (cumsum_vec[50:] - cumsum_vec[:-50]) / 50
-                #ma_vec_100 = (cumsum_vec[100:] - cumsum_vec[:-100]) / 100
-                ma_vec_200 = (cumsum_vec[200:] - cumsum_vec[:-200]) / 200
-                #if len(ma_vec_50) > 1:
-                #    self.axes[ax_index].plot(np.pad(ma_vec_50, (len(data) - len(ma_vec_50), 0), 'edge'), color='y')
-                #if len(ma_vec_100) > 1:
-                #    self.axes[ax_index].plot(np.pad(ma_vec_100, (len(data) - len(ma_vec_100), 0), 'edge'), color='r')
-                if len(ma_vec_200) > 1:
-                    self.axes[ax_index].plot(np.pad(ma_vec_200, (len(data) - len(ma_vec_200), 0), 'edge'), color='k')
-
-            self.axes[0].clear()
-            self.axes[0].set_title('frame %s. reward: %s' % (frame_idx, np.mean(rewards[-10:])))
-
-            #for target_update_ep in self.target_update_eps:
-            #    self.axes[0].axvline(x=target_update_ep, color='g')
-            self.axes[0].plot(rewards)
-            plot_trends(0, rewards)
-
-            self.axes[1].clear()
-            self.axes[1].set_title('loss')
-
-            #for target_update_step in self.target_update_steps:
-            #    self.axes[1].axvline(x=target_update_step, color='g')
-
-            self.axes[1].plot(losses)
-            plot_trends(1, losses)
-
-            self.axes[2].clear()
-            self.axes[2].set_title('Ep len')
-
-            #for target_update_ep in self.target_update_eps:
-            #    self.axes[2].axvline(x=target_update_ep, color='g')
-
-            self.axes[2].plot(ep_lens)
-            plot_trends(2, ep_lens)
-
-            self.axes[3].clear()
-            self.axes[3].set_title('Action histogram')
-
-            # for target_update_ep in self.target_update_eps:
-            #    self.axes[3].axvline(x=target_update_ep, color='g')
-
-            action_histograms_tmp, action_idx = downsample_data(np.array(action_histograms),100000)
-            self.axes[3].plot(action_idx, action_histograms_tmp)
-            for i in range(action_histograms_tmp.shape[1]):
-                if 1 + i < action_histograms_tmp.shape[1]:
-                    self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i],
-                                              action_histograms_tmp[:, i + 1])
-                else:
-                    self.axes[3].fill_between(np.arange(action_histograms_tmp.shape[0]), action_histograms_tmp[:, i])
-
-            # plt.draw()
-            if self.save_fig is not None:
-                self.fig.savefig(self.save_fig)
-            # plt.pause(0.01)
-
-            # Guided network experiment
-            cumsum_vec = np.cumsum(np.insert(rewards, 0, 0))
-            ma_vec_100 = (cumsum_vec[100:] - cumsum_vec[:-100]) / 100
-
-            if len(ma_vec_100) > 0 and len(self.memory) >= self.min_memory_size:
-                if self.teacher_network is not None:
-                    if self.init_avg_reward == sys.float_info.min / 100:
-                        self.init_avg_reward = ma_vec_100[-1]
-                # self.end_avg_reward = ma_vec_100[-1]
-
-    # TODO not needed
-    def _plot_ipython3(
-            self,
-            frame_idx: int,
-            scores: List[float],
-            losses: List[float],
-    ):
-        """Plot the training progresses."""
-        # clear_output(True)
-        plt.figure(figsize=(20, 5))
-        plt.subplot(131)
-        plt.title('frame %s. score: %s' % (frame_idx, np.mean(scores[-10:])))
-        plt.plot(scores)
-        plt.subplot(132)
-        plt.title('loss')
-        plt.plot(losses)
-        plt.show()

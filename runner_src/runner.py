@@ -35,6 +35,7 @@ class Runner():
 
     def make_agent(self):
         os.makedirs(f'results/{self.name}/videos', exist_ok=True)
+        os.makedirs(f'results/{self.name}/stats', exist_ok=True)
 
         env_data = self.config
         config = self.config
@@ -108,7 +109,7 @@ class Runner():
             conv_space=conv_space,
             learning_interval=config["params"]["learning_interval"],
             min_memory_size=config["params"]["min_memory_size"],
-            save_fig=f'results/{self.name}/plot.png'
+            save_stats_path=f'results/{self.name}/stats'
         )
 
     def run_t(self):
@@ -127,7 +128,7 @@ class Runner():
                          plotting_interval=self.config["plot"]["interval"])
         self.running = False
 
-    def run(self,console_run=False):
+    def run(self, console_run=False):
         if not self.running:
             if console_run:
                 self.run_t()
