@@ -72,8 +72,8 @@ def get_minigrid_experiment():
     all_envs = [empty, four_rooms, unlock, door_key, go_to_door, key_corridor, fetch, unlock_pickup,
                 blocked_unlock_pickup, red_blue_door, go_to_object, obstructed_maze_dlhb, put_near, multi_room,
                 obstructed_maze_full, locked_room]
-    # flat_envs = [j for i in all_envs for j in i]
-    flat_envs = [i[0] for i in all_envs if len(i) > 0]
+    flat_envs = [j for i in all_envs for j in i]
+    # flat_envs = [i[0] for i in all_envs if len(i) > 0]
     print("flat envs len: ", len(flat_envs))
     return {
         id_: {

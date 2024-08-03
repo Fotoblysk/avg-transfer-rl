@@ -3,6 +3,20 @@
 env_group=0
 exp_set=0
 
+is_in_list() {
+    local var="$1"
+    shift
+    local list=("$@")
+    for item in "${list[@]}"; do
+        if [ "$var" == "$item" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+banned_machines=("00000" "18985")
+
 min() {
     if [ "$1" -lt "$2" ]; then
         echo "$1"
@@ -12,22 +26,34 @@ min() {
 }
 
 tasks_per_instance=2
-TASKS_NUMBER=14
+TASKS_NUMBER=32
 
 max_runner_id=$((TASKS_NUMBER / tasks_per_instance))
 
 echo $max_runner_id
-AVG_MAX=2
+AVG_MAX=1
 for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
   for ((runner_id=0; runner_id<=max_runner_id; runner_id++)); do
     launched=0
     while [ "$launched" != "1" ]; do
-      export query_result=$(vastai search offers 'reliability > 0.98 dph < 0.2 cpu_cores > 1' -o 'dph+' -d)
-      echo "Price: "
-      echo $(echo "$query_result" | awk 'NR==2 {print $10}')
-      echo "Id: "
-      export I_ID=$(echo "$query_result" | awk 'NR==2 {print $1}')
-      echo "$I_ID"
+      proposed_machine_id="00000"
+      export query_result=$(vastai search offers 'reliability > 0.98 dph < 0.2 cpu_cores > 1 rented=False' -o 'dph+' -d)
+
+      row_n=2
+      while is_in_list "$proposed_machine_id" "${banned_machines[@]}"; do
+        proposed_machine_id=$(echo "$query_result" | awk "NR==$row_n"' {print $19}')
+
+        echo "Price: "
+        echo $(echo "$query_result" | awk "NR==$row_n"' {print $10}')
+        echo "Id: "
+        export I_ID=$(echo "$query_result" | awk "NR==$row_n"' {print $1}')
+        echo "$I_ID"
+
+        if is_in_list "$proposed_machine_id" "${banned_machines[@]}"; then
+          echo "Catched bad instance incrementing $row_n"
+          row_n=$((row_n+1))
+        fi
+      done
 
 
 
@@ -43,6 +69,10 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
         echo "$result"
         launched=$(echo $result | grep "'success': True" | wc -l)
         echo "Launched: $launched"
+      else
+        launched="1"
+        echo "Not launching false loop"
+
       fi
       sleep 1
     done
