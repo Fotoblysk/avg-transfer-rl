@@ -37,7 +37,7 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
     launched=0
     while [ "$launched" != "1" ]; do
       proposed_machine_id="00000"
-      export query_result=$(vastai search offers 'reliability > 0.98 dph < 0.2 cpu_cores > 1 rented=False' -o 'dph+' -d)
+      export query_result=$(vastai search offers 'reliability > 0.99 dph < 0.2 cpu_cores > 5 rented=False' -o 'dph+' -d)
 
       row_n=2
       while is_in_list "$proposed_machine_id" "${banned_machines[@]}"; do
