@@ -74,7 +74,6 @@ def get_minigrid_experiment():
                 obstructed_maze_full, locked_room]
     flat_envs = [j for i in all_envs for j in i]
     # flat_envs = [i[0] for i in all_envs if len(i) > 0]
-    print("flat envs len: ", len(flat_envs))
     return {
         id_: {
             "defaults": "merge",
@@ -97,5 +96,3 @@ def get_minigrid_experiment():
         }
         for id_ in flat_envs}
 
-
-print(len(get_minigrid_experiment()))

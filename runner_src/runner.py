@@ -132,6 +132,7 @@ class Runner():
         if not self.running:
             if console_run:
                 self.run_t()
+                self.save()
             else:
                 self.t = threading.Thread(target=self.run_t) # we can use process in worst case
 

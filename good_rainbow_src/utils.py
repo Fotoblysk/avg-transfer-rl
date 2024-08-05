@@ -56,3 +56,31 @@ def downsample_data(data, max_data_points):
         downsampled_indices[i] = start_idx
 
     return downsampled_data, downsampled_indices
+
+
+def discounted_rewards(rewards, gamma):
+    """
+    Compute the sum of discounted rewards.
+
+    Parameters:
+    rewards (np.ndarray): Array of rewards.
+    gamma (float): Discount factor.
+
+    Returns:
+    float: Sum of discounted rewards.
+    """
+    n = len(rewards)
+    discounts = np.logspace(0, n-1, num=n, base=gamma)
+    return np.sum(rewards * discounts)
+
+def sum_rewards(rewards):
+    """
+    Compute the sum of rewards.
+
+    Parameters:
+    rewards (np.ndarray): Array of rewards.
+
+    Returns:
+    float: Sum of rewards.
+    """
+    return np.sum(rewards)

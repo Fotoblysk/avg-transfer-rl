@@ -1,12 +1,24 @@
+from config.env_config.frozen_lake import get_frozen_lake_experiment
 from config.env_config.gridword import get_minigrid_experiment
+from config.env_config.lunar_lander import get_lunar_lander_experiment
 from config.env_config.old_playground_configs import old_playground_configs
 from good_rainbow_src.utils import merge_dicts
 
 def get_playgroud_configs():
     return get_configs(old_playground_configs)
 
+def get_frozen_configs():
+    return get_configs(get_frozen_lake_experiment())
+def get_lunar_configs():
+    return get_configs(get_lunar_lander_experiment())
 def get_gridword_configs():
     return get_configs(get_minigrid_experiment())
+
+def get_joint_configs():
+    #return get_playgroud_configs()
+    #return get_configs(get_minigrid_experiment())
+    return get_configs({**get_frozen_lake_experiment(), **get_lunar_lander_experiment(), **get_minigrid_experiment()})
+
 def get_configs(configs_to_inject):
     defaults = {
         "meta": {
@@ -25,7 +37,7 @@ def get_configs(configs_to_inject):
             "num_frames": 2000000,
             "memory_size": 100000,
             # in orginal is 1M sadly not anough ram 0.4M should be possible tho might get to swap so 0.3 for safety # goes to swap :( 0.09 for now
-            "batch_size": 32,  # on internet  128 *12 test, 32 in paper
+            "batch_size": 128,  # on internet  128 *12 test, 32 in paper
             "learning_interval": 4,  # because of bigger batch size? -2 just for safety
             "target_update": None,
             # we divide of learning interval and how we count. 32k was in orginal rainbow, 10k in orginal dqn
@@ -35,7 +47,7 @@ def get_configs(configs_to_inject):
             "interval": 100000
         }
     }
-    defaults["params"]["target_update"] = 1000 // defaults["params"]["learning_interval"]  # 32000
+    defaults["params"]["target_update"] = 100 // defaults["params"]["learning_interval"]  # 32000
     defaults["params"]["min_memory_size"] = min(int(defaults["params"]["memory_size"] * 0.9), 80000)
 
     configs_raw = configs_to_inject

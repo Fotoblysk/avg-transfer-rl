@@ -27,7 +27,7 @@ min() {
 
 
 tasks_per_instance=2
-TASKS_NUMBER=36
+TASKS_NUMBER=47
 
 max_runner_id=$((TASKS_NUMBER / tasks_per_instance))
 
@@ -38,7 +38,7 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
     launched=0
     while [ "$launched" != "1" ]; do
       proposed_machine_id="00000"
-      export query_result=$(vastai search offers 'reliability > 0.99 dph < 0.16 cpu_cores_effective > 7 rented=False cpu_ghz > 2' -o 'cpu_cores_effective-' -d)
+      export query_result=$(vastai search offers 'reliability > 0.99 dph < 0.2 cpu_cores_effective > 7 rented=False cpu_ghz > 2' -o 'cpu_cores_effective-' -d)
 
       row_n=2
       while is_in_list "$proposed_machine_id" "${banned_machines[@]}"; do

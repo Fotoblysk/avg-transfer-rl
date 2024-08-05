@@ -1,37 +1,41 @@
-import csv
-from datetime import datetime
 
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
 
-# Function to append a single row to the CSV file
-rows_names = ["time", "value", "status"]
+def softmax(x):
+    """
+    Compute the softmax of vector x.
 
+    Parameters:
+    x (torch.Tensor): Input tensor.
 
-def append_to_csv(file_name, row):
-    with open(file_name, mode='a', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=rows_names)
+    Returns:
+    torch.Tensor: Softmax of the input tensor.
+    """
+    return torch.nn.functional.softmax(x, dim=0)
 
-        # Check if the file is empty to write the header
-        if file.tell() == 0:
-            writer.writeheader()
+# Generate t values from 0.001 to 10
+t_values = np.linspace(1e-6, 2, 1000)
 
-        print(row.keys())
-        print(row)
-        writer.writerow(row)
+# Initialize lists to store softmax values
+softmax_10t = []
+softmax_t = []
 
+# Compute softmax for each t
+for t in t_values:
+    x = torch.tensor([2 * 1/t, 1/t], dtype=torch.float32)
+    softmax_vals = softmax(x)
+    softmax_10t.append(softmax_vals[0].item())
+    softmax_t.append(softmax_vals[1].item())
 
-# Define the CSV file name
-csv_file = 'stats_log.csv'
-
-# Sample data to log
-stats = [
-    {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "value": 23, "status": "OK"},
-    {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "status": "FAIL", "value": 45},
-    {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "value": 67, "status": "OK"},
-    {"time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "value": 67, "status": "OK"},
-]
-
-# Append each row to the CSV file
-for stat in stats:
-    append_to_csv(csv_file, stat)
-
-print(f"Stats appended to {csv_file}")
+# Plot the results
+plt.figure(figsize=(10, 6))
+plt.plot(t_values, softmax_10t, label='softmax(10t)')
+plt.plot(t_values, softmax_t, label='softmax(t)')
+plt.title('Softmax of [10t, t] for t in [0.001, 10]')
+plt.xlabel('t')
+plt.ylabel('Softmax value')
+plt.legend()
+plt.grid(True)
+plt.show()

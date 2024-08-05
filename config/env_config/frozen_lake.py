@@ -47,7 +47,7 @@ def get_frozen_lake_experiment():
             "env_kwargs": {
                 "id": "FrozenLake-v1",
                 "desc": v,
-                "is_slippery": False
+                "is_slippery": True
             },
             "meta": {
                 "v_min": None,

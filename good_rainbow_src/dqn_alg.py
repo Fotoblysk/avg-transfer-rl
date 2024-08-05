@@ -11,11 +11,7 @@ import gymnasium as gym
 import matplotlib
 import torch.nn.functional as F
 
-from good_rainbow_src.utils import downsample_data
-
-
-
-
+from good_rainbow_src.utils import downsample_data, sum_rewards
 
 from torch import optim
 from typing import Dict, List, Tuple
@@ -24,6 +20,19 @@ from torch.nn.utils import clip_grad_norm_
 
 from good_rainbow_src.memory_replay import PrioritizedReplayBuffer, ReplayBuffer
 from good_rainbow_src.network_models import Network
+
+
+def softmax(x):
+    """
+    Compute the softmax of vector x.
+
+    Parameters:
+    x (torch.Tensor): Input tensor.
+
+    Returns:
+    torch.Tensor: Softmax of the input tensor.
+    """
+    return torch.nn.functional.softmax(x, dim=0)
 
 
 class FrozenClass(object):
@@ -43,17 +52,15 @@ class TrainingState(FrozenClass):
         self.is_test = False
 
         self.state, _ = env.reset()  # seed=self.seed)
-        if conv_space is True and correct_dims:
-            self.state = self.state.transpose(2, 0, 1)
 
         self.update_cnt = 0
+        self.ep_step = 0
         self.ep_id = 0
         # TODO we need class for that
         self.losses = []
         self.score = 0
         self.last_frame_ep_end = 1
         self.action_hist = np.zeros(action_dim)
-        self.guide_epsilon = 1
         self._freeze()  # no new attributes after this point.
 
 
@@ -103,13 +110,16 @@ class DQNAgent:
             learning_interval: int = 4,  # is for 32 batch_size
             epsilon_decay: float = 1 / 1000000,  # min after 1M epizodes
             max_epsilon: float = 1,
-            min_epsilon: float = 0.001,
+            min_epsilon: float = 0.01,
             correct_dims: bool = False,
             reward_clip=None,
             reward_scale=None,
             save_stats_path=None,
             # guided network experiment
-            guided_network=None
+            guided_network=None,  # ['model_path', 'other_model_path' ]
+            guided_temp_decay: float = 1 / 1000000,  # min after 1M epizodes
+            guided_max_temp: float = 1,
+            guided_min_temp: float = 1e-6,
     ):
         """Initialization.
 
@@ -129,6 +139,8 @@ class DQNAgent:
             n_step (int): step number to calculate n-step td error
         """
 
+        self.max_steps = env.spec.max_episode_steps if env.spec.max_episode_steps is not None else env.max_steps
+        self.ep_rewards_buffer = np.zeros(self.max_steps, dtype=np.float32)
         self.save_stats_path = save_stats_path
         self.reward_scale = reward_scale
         self.reward_clip = reward_clip
@@ -187,12 +199,7 @@ class DQNAgent:
         self.v_min = v_min
         self.v_max = v_max
         self.atom_size = atom_size
-        if atom_size is not None:
-            self.support = torch.linspace(
-                self.v_min, self.v_max, self.atom_size
-            ).to(self.device)
-        else:
-            self.support = None
+        self.support = None
 
         # networks: dqn, dqn_target
         self.dqn = Network(
@@ -204,8 +211,8 @@ class DQNAgent:
         self.dqn_target.load_state_dict(self.dqn.state_dict())
         self.dqn_target.eval()
 
-        # optimizer
-        self.optimizer = optim.Adam(self.dqn.parameters(), lr=0.0000625, eps=1.5 * 10 ** -4)
+        # optimizer # it was lr=0.0000625
+        self.optimizer = optim.Adam(self.dqn.parameters(), lr=1e-3*4, eps=1.5 * 1e-4)
 
         # transition to store in memory
         self.transition = list()
@@ -217,18 +224,36 @@ class DQNAgent:
         # guided network experiment
         if guided_network is not None:
             # self.end_avg_reward = 0
-            self.teacher_network = Network(
-                obs_dim, action_dim, self.atom_size, self.support, conv_space=conv_space
-            ).to(self.device)
-            self.teacher_network.load_state_dict(guided_network["model"])
-            self.teacher_avg_reward = guided_network["reward"]
-            self.init_avg_reward = sys.float_info.min / 100
-            self.end_avg_reward = sys.float_info.min / 100
+            self.guided_temp_decay = guided_temp_decay
+            self.guided_max_temp = guided_max_temp
+            self.guided_min_temp = guided_min_temp
+            self.guided_temperature = self.guided_max_temp
+
+            self.teacher_network = []
+
+            self.teacher_avg_reward = np.zeros(len(guided_network))
+            self.teacher_avg_reward.fill(1 / len(guided_network + 1))
+            self.current_ep_teacher_times_used = np.zeros(len(guided_network))
+
+            self.current_ep_student_times_used = 0
+            self.student_avg_reward = 1 / len(guided_network + 1)  # TODO (v_max-v_min)
+
+            self.current_ep_random_times_used = 0
+            self.random_avg_reward = 1 / len(guided_network + 1)  # TODO (v_max-v_min)
+
+            for fname in guided_network:
+                state = torch.load(fname)
+                self.teacher_network.append(Network(
+                    obs_dim, action_dim, self.atom_size, self.support, conv_space=conv_space
+                ).to(self.device))
+                self.teacher_network[-1].load_state_dict(state["dqn"])
+            self.chosen_policy = 0
+
         # end of guided network experiment
         self.training_state = TrainingState(self.env, self.conv_space, self.correct_dims, self.action_dim)
 
         self.ep_stats_labels = ['frame_idx', 'score', 'disc_score', 'ep_len', 'action_hist',
-                                'models_usage_hist']  # TODO finish when more
+                                'models_usage_hist', 'models_avg_reward']  # TODO finish when more
         self.loss_stats_labels = ['frame_idx', 'loss_value']
 
         with open(f"{self.save_stats_path}/train_ep_data.csv", mode='a', newline='') as file:
@@ -249,7 +274,7 @@ class DQNAgent:
         """Select an action from the input state."""
         epsilon = force_epsilon if force_epsilon is not None else self.epsilon
         # NoisyNet: no epsilon greedy action selection
-        if len(self.memory) < self.batch_size and len(
+        if len(self.memory) < self.batch_size or len(
                 self.memory) < self.min_memory_size:  # this might not be needed if noice reseted
             # get random action for beginning of learning (NoisyNet feels not enough)
             # selected_action = random.randrange(self.env.action_space.n) # old one probably worse
@@ -259,6 +284,7 @@ class DQNAgent:
 
         if epsilon > np.random.random():  # fixme added back epsilon probably not needed but lets keep it just for test
             selected_action = self.env.action_space.sample()
+            self.chosen_policy = -1
         else:
             selected_action = network(
                 torch.FloatTensor(np.array(state, dtype=np.float32)).to(self.device)
@@ -266,7 +292,6 @@ class DQNAgent:
             selected_action = selected_action.detach().cpu().numpy()
 
         # mode: train / test
-        self.training_state.is_test = False
         if not self.training_state.is_test:
             self.transition = [state, selected_action]
 
@@ -283,8 +308,6 @@ class DQNAgent:
             reward = reward + self.reward_scale[1]
             reward = reward * self.reward_scale[0]
 
-        if self.conv_space is True and self.correct_dims:
-            next_state = next_state.transpose(2, 0, 1)  # TODO maybe just transpose it in nn
         done = terminated or truncated
 
         if not self.training_state.is_test:
@@ -366,7 +389,9 @@ class DQNAgent:
                 'disc_score': self.training_state.score,  # TODO fix it g_score
                 'ep_len': frame_idx - self.training_state.last_frame_ep_end,
                 'action_hist': self.training_state.action_hist,
-                'models_usage_hist': self.training_state.guide_epsilon
+                'models_usage_hist': [self.current_ep_random_times_used, self.current_ep_student_times_used,
+                                      *self.current_ep_teacher_times_used] if self.teacher_network is not None else None,
+                'models_avg_reward': [self.random_avg_reward, self.student_avg_reward, *self.teacher_avg_reward ] if self.teacher_network is not None else None
             })
 
         with open(f"{self.save_stats_path}/train_loss_data.csv", mode='a', newline='') as file:
@@ -376,7 +401,7 @@ class DQNAgent:
                     'frame_idx': i,
                     'loss_value': l,
                 })
-            self.training_state.losses = []
+            self.training_state.losses.clear()
 
         with open(f"{self.save_stats_path}/target_updates_frames.csv", mode='a', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=['frame_idx'])
@@ -384,36 +409,52 @@ class DQNAgent:
                 writer.writerow({
                     'frame_idx': i,
                 })
-            self.target_update_frames = []
-
+            self.target_update_frames.clear()
 
     def reset_interep_stats(self, frame_idx):
         self.training_state.score = 0
         self.training_state.last_frame_ep_end = frame_idx
-        self.training_state.action_hist = np.zeros(self.action_dim)
-        self.end_avg_reward = 0 # fixme #sum(self.training_state.scores[-10:]) / 10
+        self.training_state.action_hist.fill(0)
+        if self.teacher_network is not None:
+            self.current_ep_random_times_used = 0
+            self.current_ep_student_times_used = 0
+            self.current_ep_teacher_times_used.fill(0)
 
     def update_stats(self, frame_idx):
         self.save_stats(frame_idx)
         self.reset_interep_stats(frame_idx)
 
-    def train_step(self, frame_idx, num_frames: int, testing_function=None):
-        if self.teacher_network is not None and self.end_avg_reward < self.teacher_avg_reward:
-            self.training_state.guide_epsilon = min(max((self.teacher_avg_reward - self.end_avg_reward) / (
-                    self.teacher_avg_reward - self.init_avg_reward), 0), 1)
-            if self.training_state.guide_epsilon > np.random.random() and len(self.memory) >= self.min_memory_size:
-                teacher = self.teacher_network
-                action = self.select_action(self.training_state.state, network=teacher)
-            else:
-                action = self.select_action(self.training_state.state, network=self.dqn,
-                                            force_epsilon=0.75 * self.training_state.guide_epsilon)
+    def guided_epsilon_policy_choose(self):
+        temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
+        probs = softmax(torch.tensor([i / self.guided_temperature for i in temperatured_values], dtype=torch.float32))
+        self.chosen_policy = np.random.choice(range(len(probs)), p=probs)
+        if self.chosen_policy == 0:
+            network = self.dqn
+        else:
+            network = self.teacher_network[self.chosen_policy - 1]
+        action = self.select_action(self.training_state.state, network=network)
+        return action
+
+    def action_selection_policy_choose(self):
+        if self.teacher_network is not None:
+            action = self.guided_epsilon_policy_choose()
+        # other strategies
         else:
             action = self.select_action(self.training_state.state)
+        return action
+
+    def reward_update(self, total_avg, epizod_n, current_times_used, computed_rewards, ep_steps):
+        return (total_avg * epizod_n + (current_times_used / ep_steps) * computed_rewards) / (epizod_n + 1)
+
+    def train_step(self, frame_idx, num_frames: int, testing_function=None):
+        action = self.action_selection_policy_choose()
+
         self.training_state.action_hist[action] += 1
         next_state, reward, done = self.step(action)
 
         self.training_state.state = next_state
         self.training_state.score += reward
+        self.ep_rewards_buffer[self.training_state.ep_step] = reward
 
         # NoisyNet: removed decrease of epsilon # TODO added as NoisyNet encapsulate randomnes and network can learn to remove randomnes from the input to much in early learing
         self.epsilon = max(
@@ -422,21 +463,53 @@ class DQNAgent:
             ) * self.epsilon_decay
         )
 
+        if self.teacher_network is not None:
+            self.guided_temperature = max(
+                self.guided_min_temp, self.epsilon - (
+                        self.guided_max_temp - self.guided_min_temp
+                ) * self.guided_temp_decay
+            )
+
         # PER: increase beta
         fraction = min(frame_idx / num_frames, 1.0)
         self.beta = self.beta + fraction * (1.0 - self.beta)
+        self.training_state.ep_step += 1
+
+        if self.teacher_network is not None:
+            if self.chosen_policy == -1:
+                self.current_ep_random_times_used += 1
+            elif self.chosen_policy == 0:
+                self.current_ep_student_times_used += 1
+            else:
+                self.current_ep_teacher_times_used[self.chosen_policy - 1] += 1
 
         # if episode ends
         if done:
+            if self.teacher_network is not None:
+                self.random_avg_reward = self.reward_update(self.random_avg_reward, self.training_state.ep_id,
+                                                            self.current_ep_random_times_used,
+                                                            self.training_state.score, self.training_state.ep_step)
+
+                self.student_avg_reward = self.reward_update(self.student_avg_reward, self.training_state.ep_id,
+                                                             self.current_ep_student_times_used,
+                                                             self.training_state.score, self.training_state.ep_step)
+
+                self.teacher_avg_reward = self.reward_update(self.teacher_avg_reward, self.training_state.ep_id,
+                                                             # should work as vector operation
+                                                             self.current_ep_teacher_times_used,
+                                                             self.training_state.score, self.training_state.ep_step)
+
+            self.update_stats(frame_idx)
+
+            self.training_state.ep_id += 1
+            self.training_state.ep_step = 0
+            self.ep_rewards_buffer.fill(0)
+
             # FIXME need to test before reset god knows why
             if testing_function is not None and len(self.memory) >= self.min_memory_size:  # we dont want random
                 testing_function(self.training_state.ep_id)
             self.training_state.state, _ = self.env.reset()  # seed=self.seed)# TODO ensure that is deterministic commenting because of all same env
-            if self.conv_space is True and self.correct_dims:
-                self.training_state.state = self.training_state.state.transpose(2, 0, 1)
 
-            self.update_stats(frame_idx)
-            self.training_state.ep_id += 1
         # if training is ready
         if len(self.memory) >= self.batch_size and len(
                 self.memory) >= self.min_memory_size and frame_idx % self.learning_interval == 0:
@@ -466,8 +539,6 @@ class DQNAgent:
         self.env = gym.wrappers.RecordVideo(self.env, name_prefix=video_prefix, video_folder=video_folder)
 
         state, _ = self.env.reset(seed=self.seed)
-        if self.conv_space is True and self.correct_dims:
-            state = state.transpose(2, 0, 1)
         done = False
         score = 0
 
@@ -490,58 +561,20 @@ class DQNAgent:
         device = self.device  # for shortening the following lines
         state = torch.FloatTensor(np.stack(samples["obs"])).to(device)
         next_state = torch.FloatTensor(np.stack(samples["next_obs"])).to(device)
-        if self.atom_size is not None:
-            action = torch.LongTensor(samples["acts"]).to(device)
-        else:
-            action = torch.LongTensor(samples["acts"].reshape(-1, 1)).to(device)
+        action = torch.LongTensor(samples["acts"].reshape(-1, 1)).to(device)
         reward = torch.FloatTensor(samples["rews"].reshape(-1, 1)).to(device)
         done = torch.FloatTensor(samples["done"].reshape(-1, 1)).to(device)
 
         # Categorical DQN algorithm
-        if self.atom_size is not None:
-            delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
-            with torch.no_grad():
-                # Double DQN
-                next_action = self.dqn(next_state).argmax(1)
-                next_dist = self.dqn_target.dist(next_state)
-                next_dist = next_dist[range(self.batch_size), next_action]
+        curr_q_value = self.dqn(state).gather(1, action)
+        next_q_value = self.dqn_target(
+            next_state
+        ).max(dim=1, keepdim=True)[0].detach()
+        mask = 1 - done
+        target = (reward + self.gamma * next_q_value * mask).to(self.device)
 
-                t_z = reward + (1 - done) * gamma * self.support
-                t_z = t_z.clamp(min=self.v_min, max=self.v_max)
-                b = (t_z - self.v_min) / delta_z
-                l = b.floor().long()
-                u = b.ceil().long()
-
-                offset = (
-                    torch.linspace(
-                        0, (self.batch_size - 1) * self.atom_size, self.batch_size
-                    ).long()
-                    .unsqueeze(1)
-                    .expand(self.batch_size, self.atom_size)
-                    .to(self.device)
-                )
-
-                proj_dist = torch.zeros(next_dist.size(), device=self.device)
-                proj_dist.view(-1).index_add_(
-                    0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1)
-                )
-                proj_dist.view(-1).index_add_(
-                    0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1)
-                )
-
-            dist = self.dqn.dist(state)
-            log_p = torch.log(dist[range(self.batch_size), action])
-            elementwise_loss = -(proj_dist * log_p).sum(1)
-        else:
-            curr_q_value = self.dqn(state).gather(1, action)
-            next_q_value = self.dqn_target(
-                next_state
-            ).max(dim=1, keepdim=True)[0].detach()
-            mask = 1 - done
-            target = (reward + self.gamma * next_q_value * mask).to(self.device)
-
-            # calculate element-wise dqn loss
-            elementwise_loss = F.smooth_l1_loss(curr_q_value, target, reduction="none")
+        # calculate element-wise dqn loss
+        elementwise_loss = F.smooth_l1_loss(curr_q_value, target, reduction="none")
         return elementwise_loss
 
     def _target_hard_update(self):
