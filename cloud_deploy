@@ -3,6 +3,8 @@
 env_group=0
 exp_set=0
 
+#MANUAL_FIXING=(6 9 12)
+
 is_in_list() {
     local var="$1"
     shift
@@ -15,7 +17,7 @@ is_in_list() {
     return 1
 }
 
-banned_machines=("00000" "18985" "19543")
+banned_machines=("00000" "18985" "19543" "22965" "17578" "21252" "15473" "19440" "9440")
 
 min() {
     if [ "$1" -lt "$2" ]; then
@@ -32,13 +34,13 @@ TASKS_NUMBER=47
 max_runner_id=$((TASKS_NUMBER / tasks_per_instance))
 
 echo $max_runner_id
-AVG_MAX=1
-for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
+AVG_MAX=2
+for ((avg_id=1; avg_id<AVG_MAX; avg_id++)); do
   for ((runner_id=0; runner_id<=max_runner_id; runner_id++)); do
     launched=0
     while [ "$launched" != "1" ]; do
       proposed_machine_id="00000"
-      export query_result=$(vastai search offers 'reliability > 0.99 dph < 0.2 cpu_cores_effective > 7 rented=False cpu_ghz > 2' -o 'cpu_cores_effective-' -d)
+      export query_result=$(vastai search offers 'reliability > 0.99 dph < 0.2 cpu_cores_effective > 11 cpu_cores < 39 rented=False cpu_ghz > 3.7' -o 'cpu_cores_effective-' -d)
 
       row_n=2
       while is_in_list "$proposed_machine_id" "${banned_machines[@]}"; do
@@ -51,7 +53,7 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
         echo "$I_ID"
 
         if is_in_list "$proposed_machine_id" "${banned_machines[@]}"; then
-          echo "Catched bad instance incrementing $row_n"
+          echo "Catched bad instance incrementing $row_n $proposed_machine_id"
           row_n=$((row_n+1))
         fi
       done
@@ -64,9 +66,14 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
       max_task=$(((1+runner_id) * tasks_per_instance))
 
       max_task=$(min "$TASKS_NUMBER" "$max_task")
+      #if ! is_in_list "$runner_id" "${MANUAL_FIXING[@]}"; then
+      #  echo "Not in emerg list breaking"
+      #  break
+      #fi
+
       if [ "$min_task" != "$max_task" ]; then
         echo "Launching instance $runner_id, $avg_id, $min_task, $max_task"
-        result=$(vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 16 --ssh --direct --env "-e MY_RUNNER_ID=$runner_id -e MIN_TASK=$min_task -e MAX_TASK=$max_task -e ENV_GROUP=$env_group -e EXP_SET=$exp_set -e AVG_ID=$avg_id" --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";)
+        result=$(vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 30 --ssh --direct --env "-e MY_RUNNER_ID=$runner_id -e MIN_TASK=$min_task -e MAX_TASK=$max_task -e ENV_GROUP=$env_group -e EXP_SET=$exp_set -e AVG_ID=$avg_id" --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";)
         echo "$result"
         launched=$(echo $result | grep "'success': True" | wc -l)
         echo "Launched: $launched"
@@ -74,6 +81,9 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
         launched="1"
         echo "Not launching false loop"
 
+      fi
+      if [ "$launched" != "1" ]; then
+        sleep 300
       fi
       sleep 1
     done

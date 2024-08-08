@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 #csv_file_path = 'results/FrozenLake-map_0/stats/train_ep_data.csv'
 #csv_file_path = 'results/MiniGrid-Empty-5x5-v0/stats/train_ep_data.csv'
 csv_file_path = 'results/MiniGrid-KeyCorridorS3R1-v0/stats/train_loss_data.csv'
+csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_13-19/stats/train_loss_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-Random-6x6-v0_08-08-2024_10-25/stats/train_loss_data.csv'
 
 #csv_file_path = 'results/lunar_lander_10_0_0/stats/train_ep_data.csv'
 #csv_file_path = 'results/CartPole/stats/train_ep_data.csv'

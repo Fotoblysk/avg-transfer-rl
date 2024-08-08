@@ -61,9 +61,29 @@ class Core():
                 )
 
     def run_from_console(self, experiment_plan):
-        for config_name, additional_settings in experiment_plan:
+        for config_id, additional_settings in experiment_plan:
             print("running")
-            self.run(config_name, additional_settings, console_run=True)
+            c, config_name = select(self.configs, config_id)
+            print(config_name)
+            if "MiniGrid" in config_name:
+                files = os.listdir("sorted_models/minigrid")
+                print(len(files))
+                files = [i for i in files if "-".join(config_name.split('_')[0:1]) not in i]
+                print(len(files))
+                additional_settings["meta"]={"guided_network": ["sorted_models/minigrid/" + i for i in  files]}
+            elif "FrozenLake" in config_name:
+                files = os.listdir("sorted_models/frozen_lake")
+                print(len(files))
+                files = [i for i in files if "_".join(config_name.split('_')[0:2]) not in i]
+                print(len(files))
+                additional_settings["meta"] = {"guided_network": ["sorted_models/frozen_lake/" + i for i in files]}
+            elif "lunar_lander" in config_name:
+                files = os.listdir("sorted_models/lunar_lander")
+                print(len(files))
+                files = [i for i in files if "_".join(config_name.split('_')[0:5]) not in i]
+                print(len(files))
+                additional_settings["meta"] = {"guided_network": ["sorted_models/lunar_lander/" + i for i in files]}
+            self.run(config_id, additional_settings, console_run=True)
 
     def list_configurations(self):
         print('Index | Config name\n--------------------------')
@@ -97,7 +117,7 @@ class Core():
 
         config_to_run = deepcopy(self.configs[config_name])
 
-        merge_dicts(config_to_run, additional_settings)
+        config_to_run = merge_dicts(config_to_run, additional_settings)
         r = Runner(instance_name, config_to_run)
         r.run(console_run=console_run)
         self.running[instance_name] = r

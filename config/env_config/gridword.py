@@ -96,3 +96,6 @@ def get_minigrid_experiment():
         }
         for id_ in flat_envs}
 
+
+if __name__ == '__main__':
+    print(len(get_minigrid_experiment()))
