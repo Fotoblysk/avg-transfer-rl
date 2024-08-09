@@ -57,6 +57,6 @@ def extract_and_compress(src_dir, dest_dir):
 
 
 if __name__ == "__main__":
-    src_dir = 'cloud_results/0-0-0'
+    src_dir = 'cloud_results/0-0-2'
     dest_dir = 'extracted_results'
     extract_and_compress(src_dir, dest_dir)

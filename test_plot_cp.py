@@ -1,4 +1,6 @@
 import csv
+import os
+
 import matplotlib.pyplot as plt
 
 # Path to your CSV file
@@ -18,7 +20,6 @@ csv_file_path = 'results/MiniGrid-Empty-8x8-v0_07-08-2024_16-52/stats/train_ep_d
 csv_file_path = 'results/MiniGrid-Fetch-5x5-N2-v0_08-08-2024_11-57/stats/train_ep_data.csv'
 csv_file_path = 'results/lunar_lander_8_20_2_08-08-2024_14-42/stats/train_ep_data.csv'
 csv_file_path = 'results/FrozenLake-map_2_08-08-2024_16-15/stats/train_ep_data.csv'
-csv_file_path = 'results/MiniGrid-Empty-5x5-v0_09-08-2024_21-37/stats/train_ep_data.csv'
 
 #csv_file_path = 'results/lunar_lander_10_0_0/stats/train_ep_data.csv'
 #csv_file_path = 'results/CartPole/stats/train_ep_data.csv'
@@ -30,17 +31,6 @@ import numpy as np
 # Path to your CSV file
 
 # Initialize lists to store frame_idx and score
-frame_idx = []
-scores = []
-
-# Read the CSV file
-with open(csv_file_path, mode='r') as file:
-    csv_reader = csv.DictReader(file)
-    for row in csv_reader:
-        frame_idx.append(int(row['frame_idx']))
-        scores.append(float(row['score']))
-
-
 # Function to compute moving average with an odd window size
 def moving_average(data, window_size):
     if window_size % 2 == 0:
@@ -57,18 +47,35 @@ def moving_average(data, window_size):
 
     return moving_avg
 
+csv_file_path = 'results/FrozenLake-map_1_08-08-2024_16-23/stats/train_ep_data.csv'
 
-# Compute moving average with an odd window size
-window_size = 51  # Example window size, must be odd
-moving_avg_scores = moving_average(scores, window_size)
+csv_file_paths=os.listdir('csv_results')
+csv_file_paths = ['csv_results/' + i for i in csv_file_paths]
+for csv_file_path in csv_file_paths:
+    frame_idx = []
+    scores = []
 
-# Plot the data
-plt.figure(figsize=(10, 6))
-plt.plot(frame_idx, scores,  label='Original Scores')
-plt.plot(frame_idx, moving_avg_scores,  label='Moving Average')
-plt.xlabel('Frame Index')
-plt.ylabel('Score')
-plt.title('Score vs Frame Index with Moving Average')
-plt.legend()
-plt.grid(True)
-plt.show()
+    # Read the CSV file
+    with open(csv_file_path, mode='r') as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            frame_idx.append(int(row['frame_idx']))
+            scores.append(float(row['score']))
+
+
+
+    # Compute moving average with an odd window size
+    window_size = 51  # Example window size, must be odd
+    moving_avg_scores = moving_average(scores, window_size)
+
+    # Plot the data
+    plt.figure(figsize=(10, 6))
+    plt.plot(frame_idx, scores,  label='Original Scores')
+    plt.plot(frame_idx, moving_avg_scores,  label='Moving Average')
+    plt.xlabel('Frame Index')
+    plt.ylabel('Score')
+    plt.title('Score vs Frame Index with Moving Average')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f"reward_plots/{csv_file_path.split('/')[1].split('.')[0]}.png")
+    plt.close()

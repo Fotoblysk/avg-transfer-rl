@@ -12,7 +12,7 @@ import gymnasium as gym
 import matplotlib
 import torch.nn.functional as F
 
-from good_rainbow_src.utils import downsample_data, sum_rewards
+from good_rainbow_src.utils import downsample_data, sum_rewards, discounted_rewards
 
 from torch import optim
 from typing import Dict, List, Tuple
@@ -119,8 +119,8 @@ class DQNAgent:
             # guided network experiment
             guided_network=None,  # ['model_path', 'other_model_path' ]
             guided_temp_decay: float = 0.02,  # min after 1M epizodes
-            guided_max_temp: float = 1,
             guided_min_temp: float = 0,
+            variant="NO_REUSE"
     ):
         """Initialization.
 
@@ -140,6 +140,7 @@ class DQNAgent:
             n_step (int): step number to calculate n-step td error
         """
 
+        self.variant = variant
         self.start_time = time.time()
         self.max_steps = env.spec.max_episode_steps if env.spec.max_episode_steps is not None else env.max_steps
         self.ep_rewards_buffer = np.zeros(self.max_steps, dtype=np.float32)
@@ -148,7 +149,7 @@ class DQNAgent:
         self.reward_clip = reward_clip
         self.correct_dims = correct_dims
         self.epsilon = max_epsilon
-        self.epsilon_decay = epsilon_decay#*len(guided_network)
+        self.epsilon_decay = epsilon_decay  # *len(guided_network)
         self.max_epsilon = max_epsilon
         self.min_epsilon = min_epsilon
 
@@ -214,7 +215,7 @@ class DQNAgent:
         self.dqn_target.eval()
 
         # optimizer # it was lr=0.0000625
-        self.optimizer = optim.Adam(self.dqn.parameters(), lr=1e-3*4, eps=1.5 * 1e-4)
+        self.optimizer = optim.Adam(self.dqn.parameters(), lr=1e-3 * 4, eps=1.5 * 1e-4)
 
         # transition to store in memory
         self.transition = list()
@@ -226,44 +227,50 @@ class DQNAgent:
         # guided network experiment
         print("pre-guid")
         print(guided_network)
-        if guided_network is not None:
-            # self.end_avg_reward = 0
-            print("guid")
-            self.guided_temp_decay = guided_temp_decay
-            self.guided_max_temp = guided_max_temp
-            self.guided_min_temp = guided_min_temp
-            self.guided_temperature = self.guided_min_temp
+        if self.variant == "APDPR" or self.variant == "PRQL":
+            if guided_network is not None:
+                # self.end_avg_reward = 0
+                print("guid")
+                self.guided_temp_decay = guided_temp_decay
+                self.guided_min_temp = guided_min_temp
+                self.guided_temperature = self.guided_min_temp
 
-            self.teacher_network = []
+                self.teacher_network = []
 
-            self.teacher_avg_reward = np.zeros(len(guided_network))
-            self.teacher_avg_reward.fill(1 / (len(guided_network) + 1))
-            self.current_ep_teacher_times_used = np.zeros(len(guided_network))
-            self.teacher_usage_ratio_sum = np.zeros(len(guided_network))
-            self.teacher_usage_ratio_sum.fill(1/ (len(guided_network) + 1))
+                self.teacher_avg_reward = np.zeros(len(guided_network))
+                self.teacher_avg_reward.fill(1 / (len(guided_network) + 1))
+                self.current_ep_teacher_times_used = np.zeros(len(guided_network))
 
-            self.current_ep_student_times_used = 0
-            self.student_avg_reward = 1 / (len(guided_network) + 1)  # TODO (v_max-v_min)
-            self.student_usage_ratio_sum =  1/(len(guided_network) + 1)
+                self.teacher_usage_ratio_sum = np.zeros(len(guided_network))
+                self.teacher_usage_ratio_sum.fill(1)  # / (len(guided_network) + 1))
 
-            self.current_ep_random_times_used = 0
-            self.random_avg_reward = 1 / (len(guided_network) + 1)  # TODO (v_max-v_min)
-            self.random_usage_ratio_sum = 1/(len(guided_network) + 1) # just for consistency
-            self.probs = None
+                self.current_ep_student_times_used = 0
+                self.student_avg_reward = 1 / (len(guided_network) + 1)  # TODO (v_max-v_min)
+                self.student_usage_ratio_sum = 1 / (len(guided_network) + 1)
 
-            for fname in guided_network:
-                state = torch.load(fname)
-
-                # effic
-                temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
+                self.current_ep_random_times_used = 0
+                self.random_avg_reward = 1 / (len(guided_network) + 1)  # TODO (v_max-v_min)
+                self.random_usage_ratio_sum = 1 / (len(guided_network) + 1)  # just for consistency
+                self.probs = None
+                # temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
                 self.probs = softmax(
-                    torch.tensor([i * self.guided_temperature for i in temperatured_values], dtype=torch.float64))
+                    torch.tensor(
+                        [i * self.guided_temperature for i in [self.student_avg_reward, *self.teacher_avg_reward]],
+                        dtype=torch.float64))
 
-                self.teacher_network.append(Network(
-                    obs_dim, action_dim, self.atom_size, self.support, conv_space=conv_space
-                ).to(self.device))
-                self.teacher_network[-1].load_state_dict(state["dqn"])
-            self.chosen_policy = 0
+                for fname in guided_network:
+                    state = torch.load(fname)
+                    # effic
+                    self.teacher_network.append(Network(
+                        obs_dim, action_dim, self.atom_size, self.support, conv_space=conv_space
+                    ).to(self.device))
+                    self.teacher_network[-1].load_state_dict(state["dqn"])
+                self.chosen_policy = 0
+                if variant == "PRQL":
+                    self.max_prql_psi = 1
+                    self.current_prql_psi = self.max_prql_psi
+                    self.prql_psi_decay = 0.95
+                    self.current_prql_policy = np.random.choice(range(len(self.probs)))
 
         # end of guided network experiment
         self.training_state = TrainingState(self.env, self.conv_space, self.correct_dims, self.action_dim)
@@ -283,6 +290,13 @@ class DQNAgent:
         with open(f"{self.save_stats_path}/target_updates_frames.csv", mode='a', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=['frame_idx'])
             writer.writeheader()
+        if variant == "NO_TRANSFER":
+            pass
+
+        if variant == "DIRECT_WEIGHT_REUSE":
+            state = guided_network[0]
+            self.dqn.load_state_dict(state["dqn"])
+            self.dqn_target.load_state_dict(state["dqn"])
 
     def select_action(self, state: np.ndarray, force_epsilon=None, network=None) -> np.ndarray:
         if network is None:
@@ -405,9 +419,11 @@ class DQNAgent:
                 'disc_score': self.training_state.score,  # TODO fix it g_score
                 'ep_len': frame_idx - self.training_state.last_frame_ep_end,
                 'action_hist': self.training_state.action_hist,
-                'models_usage_hist': [i/(frame_idx - self.training_state.last_frame_ep_end) for i in[self.current_ep_random_times_used, self.current_ep_student_times_used,
-                                      *self.current_ep_teacher_times_used]] if self.teacher_network is not None else None,
-                'models_avg_reward': [self.random_avg_reward, self.student_avg_reward, *self.teacher_avg_reward ] if self.teacher_network is not None else None,
+                'models_usage_hist': [i / (frame_idx - self.training_state.last_frame_ep_end) for i in
+                                      [self.current_ep_random_times_used, self.current_ep_student_times_used,
+                                       *self.current_ep_teacher_times_used]] if self.teacher_network is not None else None,
+                'models_avg_reward': [self.random_avg_reward, self.student_avg_reward,
+                                      *self.teacher_avg_reward] if self.teacher_network is not None else None,
                 'model_choose_probs': [float(i) for i in self.probs] if self.probs is not None else None
             })
 
@@ -429,7 +445,7 @@ class DQNAgent:
             self.target_update_frames.clear()
         with open(f'{self.save_stats_path}/current_speed.csv', 'w') as file:
             # Write a string to the file
-            file.write(f"{int(60*60* frame_idx/(time.time()-self.start_time))}")
+            file.write(f"{int(60 * 60 * frame_idx / (time.time() - self.start_time))}")
 
     def reset_interep_stats(self, frame_idx):
         self.training_state.score = 0
@@ -439,6 +455,15 @@ class DQNAgent:
             self.current_ep_random_times_used = 0
             self.current_ep_student_times_used = 0
             self.current_ep_teacher_times_used.fill(0)
+        if self.variant == "APDPR" or self.variant == "PRQL":
+            temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
+            self.probs = softmax(
+                torch.tensor([i * self.guided_temperature for i in temperatured_values], dtype=torch.float64))
+            if self.variant == "APDPR":
+                self.probs = self.adjust_probabilities(self.probs)
+        if self.variant == "PRQL":
+            self.current_prql_policy = np.random.choice(range(len(self.probs)), p=self.probs)
+            self.current_prql_psi = self.max_prql_psi
 
     def update_stats(self, frame_idx):
         self.save_stats(frame_idx)
@@ -476,9 +501,9 @@ class DQNAgent:
     def adjust_probabilities(self, probs):
         old_probs = probs
         n = len(probs)
-        min_first_prob = 1 / (n+1)
+        min_first_prob = 1 / (n + 1)
         # Ensure the sum of the probabilities is 1
-        probs = self.adjust_array(probs, self.min_epsilon/n)
+        probs = self.adjust_array(probs, self.min_epsilon / n)
         if probs[0] < min_first_prob:
             total_sum = sum(probs)
             # Calculate the sum of the original remaining probabilities
@@ -496,12 +521,25 @@ class DQNAgent:
         else:
             return probs
 
-    def guided_epsilon_policy_choose(self):
-        temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
-        if self.probs is None:
-            self.probs = softmax(torch.tensor([i * self.guided_temperature for i in temperatured_values], dtype=torch.float64))
-            self.probs = self.adjust_probabilities(self.probs)
+    def prql_epsilon_policy_choose(self):
+        self.chosen_policy = self.current_prql_policy
+        if self.current_prql_policy == 0:
+            action = self.select_action(self.training_state.state, network=self.dqn, force_epsilon=0)
+        else:
+            if random.random() < self.current_prql_psi:
+                action = self.select_action(self.training_state.state,
+                                            network=self.teacher_network[self.chosen_policy - 1],
+                                            force_epsilon=0)
+            else:
+                self.chosen_policy = 0
+                action = self.select_action(self.training_state.state,
+                                            network=self.dqn,
+                                            force_epsilon=1 - self.current_prql_psi)
 
+        self.current_prql_psi = self.current_prql_psi * self.prql_psi_decay
+        return action
+
+    def apdpr_epsilon_policy_choose(self):
 
         self.chosen_policy = np.random.choice(range(len(self.probs)), p=self.probs)
         if self.chosen_policy == 0:
@@ -512,18 +550,23 @@ class DQNAgent:
         return action
 
     def action_selection_policy_choose(self):
-        if self.teacher_network is not None:
-            action = self.guided_epsilon_policy_choose()
-        # other strategies
+        if self.variant == "APDPR" and self.teacher_network is not None:
+            action = self.apdpr_epsilon_policy_choose()
+        elif self.variant == "PRQL" and self.teacher_network is not None:
+            action = self.prql_epsilon_policy_choose()
         else:
             action = self.select_action(self.training_state.state)
         return action
 
-    def reward_update(self, total_avg, weight_sum, epizod_n, current_times_used, computed_rewards, ep_steps):
-        return (0.999*total_avg * weight_sum + (current_times_used / ep_steps) * computed_rewards)/(
-                0.999*weight_sum + (current_times_used / ep_steps)
-        ), 0.999*weight_sum + (current_times_used / ep_steps)
-        #return (0.99*total_avg * epizod_n + 1.01*(current_times_used / ep_steps) * computed_rewards) / (epizod_n + 1)
+    def reward_update_apdpr(self, total_avg, weight_sum, epizod_n, current_times_used, computed_rewards, ep_steps):
+        return (0.999 * total_avg * weight_sum + (current_times_used / ep_steps) * computed_rewards) / (
+                0.999 * weight_sum + (current_times_used / ep_steps)
+        ), 0.999 * weight_sum + (current_times_used / ep_steps)
+        # return (0.99*total_avg * epizod_n + 1.01*(current_times_used / ep_steps) * computed_rewards) / (epizod_n + 1)
+
+    def reward_update_prql(self, total_avg, policy_eps_used, computed_rewards):
+        # TODO finish
+        return (total_avg * policy_eps_used + computed_rewards) / (policy_eps_used + 1), policy_eps_used + 1
 
     def train_step(self, frame_idx, num_frames: int, testing_function=None):
         action = self.action_selection_policy_choose()
@@ -541,11 +584,11 @@ class DQNAgent:
                     self.max_epsilon - self.min_epsilon
             ) * self.epsilon_decay
         )
-            #self.guided_temperature = max(
-            #    self.guided_min_temp, self.epsilon - (
-            #            self.guided_max_temp - self.guided_min_temp
-            #    ) * self.guided_temp_decay
-            #)
+        # self.guided_temperature = max(
+        #    self.guided_min_temp, self.epsilon - (
+        #            self.guided_max_temp - self.guided_min_temp
+        #    ) * self.guided_temp_decay
+        # )
 
         # PER: increase beta
         fraction = min(frame_idx / num_frames, 1.0)
@@ -563,24 +606,60 @@ class DQNAgent:
         # if episode ends
         if done:
             # TODO Am I sure?
-            if self.teacher_network is not None:
+            if self.teacher_network is not None and self.variant == "APDPR" or self.variant == "PRQL":
                 self.guided_temperature += self.guided_temp_decay
-            if self.teacher_network is not None:
-                self.random_avg_reward, self.random_usage_ratio_sum = self.reward_update(self.random_avg_reward, self.random_usage_ratio_sum, self.training_state.ep_id,
-                                                            self.current_ep_random_times_used,
-                                                            self.training_state.score, self.training_state.ep_step)
 
-                self.student_avg_reward, self.student_usage_ratio_sum = self.reward_update(self.student_avg_reward, self.student_usage_ratio_sum, self.training_state.ep_id,
-                                                             self.current_ep_student_times_used,
-                                                             self.training_state.score, self.training_state.ep_step)
+            if self.teacher_network is not None and self.variant == "APDPR":
+                (self.random_avg_reward,
+                 self.random_usage_ratio_sum) = (
+                    self.reward_update_apdpr(self.random_avg_reward,
+                                             self.random_usage_ratio_sum,
+                                             self.training_state.ep_id,
+                                             self.current_ep_random_times_used,
+                                             self.training_state.score,
+                                             self.training_state.ep_step))
 
-                self.teacher_avg_reward, self.teacher_usage_ratio_sum = self.reward_update(self.teacher_avg_reward, self.teacher_usage_ratio_sum, self.training_state.ep_id,
-                                                             # should work as vector operation
-                                                             self.current_ep_teacher_times_used,
-                                                             self.training_state.score, self.training_state.ep_step)
+                (self.student_avg_reward,
+                 self.student_usage_ratio_sum) = (
+                    self.reward_update_apdpr(
+                        self.student_avg_reward,
+                        self.student_usage_ratio_sum,
+                        self.training_state.ep_id,
+                        self.current_ep_student_times_used,
+                        self.training_state.score,
+                        self.training_state.ep_step))
+
+                (self.teacher_avg_reward,
+                 self.teacher_usage_ratio_sum) = (
+                    self.reward_update_apdpr(
+                        self.teacher_avg_reward,
+                        self.teacher_usage_ratio_sum,
+                        self.training_state.ep_id,
+                        # should work as vector operation
+                        self.current_ep_teacher_times_used,
+                        self.training_state.score,
+                        self.training_state.ep_step))
+
+            if self.variant == "PRQL":
+                if self.current_prql_policy == 0:
+                    (self.student_avg_reward,
+                     self.student_usage_ratio_sum) = (
+                        self.reward_update_prql(
+                            self.student_avg_reward,
+                            self.student_usage_ratio_sum,
+                            discounted_rewards(self.ep_rewards_buffer, gamma=self.gamma)
+                        ))
+                else:
+                    (self.teacher_avg_reward[self.current_prql_policy - 1],
+                     self.teacher_usage_ratio_sum[self.current_prql_policy - 1]) = (
+                        self.reward_update_prql(
+                            self.teacher_avg_reward[self.current_prql_policy - 1],
+                            self.teacher_usage_ratio_sum[self.current_prql_policy - 1],
+                            discounted_rewards(self.ep_rewards_buffer, gamma=self.gamma)
+                        ))
 
             self.update_stats(frame_idx)
-            self.probs = None
+
 
             self.training_state.ep_id += 1
             self.training_state.ep_step = 0

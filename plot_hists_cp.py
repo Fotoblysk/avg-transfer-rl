@@ -2,6 +2,7 @@ import csv
 import ast
 import itertools
 import os
+import sys
 
 import matplotlib.pyplot as plt
 import re
@@ -104,7 +105,7 @@ def plot_data(data):
     # Plot models_avg_reward
 
     plt.figure(figsize=(10, 6))
-    if 'MiniGrid' in file_path:
+    if 'minigrid' in file_path:
         labels = ['RANDOM', 'STUDENT', *[i for i in os.listdir('sorted_models/minigrid/') if file_path.split('/')[1].split('_')[0] not in i]]
     if 'lunar_lander' in file_path:
         print(file_path)
@@ -133,18 +134,19 @@ def plot_data(data):
 
 if __name__ == "__main__":
     #csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_01-46/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_03-16/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_10-08/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_10-31/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_07-08-2024_16-52/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Empty-Random-6x6-v0_07-08-2024_17-39/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Fetch-5x5-N2-v0_08-08-2024_11-57/stats/train_ep_data.csv'
-    csv_file_path = 'results/lunar_lander_8_20_2_08-08-2024_14-42/stats/train_ep_data.csv'
-    csv_file_path = 'results/FrozenLake-map_3_08-08-2024_15-41/stats/train_ep_data.csv'
-    csv_file_path = 'results/FrozenLake-map_3_08-08-2024_15-41/stats/train_ep_data.csv'
-    csv_file_path = 'results/FrozenLake-map_2_08-08-2024_16-15/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Empty-5x5-v0_09-08-2024_21-37/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Empty-5x5-v0_09-08-2024_21-47/stats/train_ep_data.csv'
-    file_path = csv_file_path
-    data = read_csv(file_path)
-    plot_data(data)
+    #csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_03-16/stats/train_ep_data.csv'
+    #csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_10-08/stats/train_ep_data.csv'
+    #csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_10-31/stats/train_ep_data.csv'
+    #csv_file_path = 'results/MiniGrid-Empty-8x8-v0_07-08-2024_16-52/stats/train_ep_data.csv'
+    #csv_file_path = 'results/MiniGrid-Empty-Random-6x6-v0_07-08-2024_17-39/stats/train_ep_data.csv'
+    #csv_file_path = 'results/MiniGrid-Fetch-5x5-N2-v0_08-08-2024_11-57/stats/train_ep_data.csv'
+    #csv_file_path = 'results/lunar_lander_8_20_2_08-08-2024_14-42/stats/train_ep_data.csv'
+    #csv_file_path = 'results/FrozenLake-map_3_08-08-2024_15-41/stats/train_ep_data.csv'
+    #csv_file_path = 'results/FrozenLake-map_3_08-08-2024_15-41/stats/train_ep_data.csv'
+    #csv_file_path = 'results/FrozenLake-map_2_08-08-2024_16-15/stats/train_ep_data.csv'
+    #csv_file_path = 'results/FrozenLake-map_1_08-08-2024_16-23/stats/train_ep_data.csv'
+    csv_file_paths = sys.argv[1:]
+    #file_path = csv_file_path
+    for file_path in csv_file_paths:
+        data = read_csv(file_path)
+        plot_data(data)
