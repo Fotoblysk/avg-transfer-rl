@@ -161,3 +161,16 @@ cython_debug/
 #
 #
 videos/
+
+cloud_results/
+.idea/
+extracted_results/
+extracted_results_back/
+good/
+results/
+sorted_models_back/
+csv_results/
+extracted_results_bak2/
+reward_plots/
+sorted_models_bak2/
+

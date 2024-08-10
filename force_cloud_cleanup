@@ -1,0 +1,15 @@
+#!/bin/bash
+
+echo 'Force clean cloud'
+export INSTANCES_RAW=$(vastai show instances)
+instances_n=$(echo "$INSTANCES_RAW" | wc -l)
+for i in $(seq 2 $instances_n)
+do
+  echo "Current number: $i"
+  instance_id=$(echo "$INSTANCES_RAW" | awk 'NR=='"$i"' {print $1}')
+  echo "Instance id: $instance_id"
+
+  echo "Done removing instance"
+  vastai destroy instance "$instance_id"
+done
+echo "Loop check end"

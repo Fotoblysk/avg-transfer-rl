@@ -1,0 +1,70 @@
+#!/bin/bash
+not_all_done="1"
+
+ssh-url-proxy() {
+  ssh_url=$(vastai ssh-url "$1")
+  ssh_test=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" "echo testsshconnection")
+  ssh_test=$(echo "$ssh_test" | grep 'testsshconnection' | wc -l)
+
+  if [ "$ssh_test" != "1" ]; then
+    echo "ssh://root@$2:$3" # hacks here
+  else
+    vastai ssh-url $1
+  fi
+
+}
+
+while [ "$not_all_done" != "0" ]; do
+  echo 'Periodic check for done instances'
+  not_all_done="0"
+  export INSTANCES_RAW=$(vastai show instances)
+  instances_n=$(echo "$INSTANCES_RAW" | wc -l)
+  for i in $(seq 2 $instances_n)
+  do
+    instance_id=$(echo "$INSTANCES_RAW" | awk 'NR=='"$i"' {print $1}')
+
+    raw_ssh_url=$(echo "$INSTANCES_RAW" | awk 'NR=='"$i"' {print $10}')
+
+    raw_ssh_port=$(echo "$INSTANCES_RAW" | awk 'NR=='"$i"' {print $11}')
+
+    echo "Instance id: $instance_id ; Current number: $i"
+
+    ssh_url=$(ssh-url-proxy "$instance_id" "$raw_ssh_url" "$raw_ssh_port")
+
+    ssh_test=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" "echo testsshconnection")
+    ssh_test=$(echo "$ssh_test" | grep 'testsshconnection' | wc -l)
+    if [ "$ssh_test" != "1" ]; then
+      echo "Issue with ssh: $ssh_url"
+    fi
+
+
+    is_done=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" "ls | grep jobs_done | wc -l")
+
+    if [ "$is_done" == "1" ]; then
+      runner_id=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'echo $MY_RUNNER_ID')
+      exp_set=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'echo $EXP_SET')
+      avg_id=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'echo $AVG_ID')
+      env_group=$(ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'echo $ENV_GROUP')
+      mkdir -p "./cloud_results/$exp_set-$env_group-$avg_id/$runner_id"
+
+      user=$(echo $ssh_url | awk -F'[/:@]' '{print $4}')
+      host=$(echo $ssh_url | awk -F'[/:@]' '{print $5}')
+      port=$(echo $ssh_url | awk -F'[/:@]' '{print $6}')
+
+      scp -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey -P "$port" "$user@$host:/root/results.tar.gz" "./cloud_results/$exp_set-$env_group-$avg_id/$runner_id"
+      if [ $? -eq 0 ]; then
+        echo "Done removing instance"
+        vastai destroy instance "$instance_id"
+      else
+        echo "SCP failed"
+        not_all_done=is_done
+       fi
+    else
+      echo "Not done yet"
+      ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'find /workspace -name train_ep_data.csv -exec sh -c '\''tail -n 2 "{}"'\'' \;'
+      not_all_done=is_done
+    fi
+  done
+  echo "Loop check end"
+  sleep 60
+done

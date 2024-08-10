@@ -1,3 +1,6 @@
+from copy import deepcopy
+
+from good_rainbow_src.utils import merge_dicts
 from runner_src.runner import *
 from datetime import datetime
 
@@ -57,6 +60,59 @@ class Core():
                     '=============================\n'
                 )
 
+    def run_from_console(self, experiment_plan):
+        for config_id, additional_settings in experiment_plan:
+            print("running")
+            c, config_name = select(self.configs, config_id)
+            print(config_name)
+            variant = additional_settings["meta"]["variant"]
+            if "APDPR" in variant or variant == "PRQL" or variant == "DIRECT_WEIGHT_REUSE":
+                if "MiniGrid" in config_name:
+                    files = list(sorted(os.listdir("sorted_models/minigrid")))
+                    print(len(files))
+                    files = [i for i in files if "-".join(config_name.split('_')[0:1]) not in i]
+                    if variant == "DIRECT_WEIGHT_REUSE":
+                        files_similar = [i for i in files if "-".join(config_name.split("-")[0:2]) in i]
+                        print("dupa")
+                        print(files_similar)
+                        print("-".join(config_name.split("-")[0:2]))
+                        if len(files_similar) == 0:
+                            files = list(sorted(os.listdir("sorted_models/minigrid")))
+                            indexes = [i for i, j in enumerate(files) if "-".join(config_name.split('_')[0:1]) in j]
+                            if len(indexes) == 0:
+                                index = 0
+                            else:
+                                if indexes[0] - 1 >=0:
+                                    index = indexes[0] - 1
+                                else:
+                                    index = indexes[0] + 1
+
+                            files = [files[index]]
+                        else:
+                            files = [files_similar[0]]
+
+                    print(len(files))
+                    additional_settings["meta"]["guided_network"] = ["sorted_models/minigrid/" + i for i in  files]
+                elif "FrozenLake" in config_name:
+                    files = list(sorted(os.listdir("sorted_models/frozen_lake")))
+                    print(len(files))
+                    files = [i for i in files if "_".join(config_name.split('_')[0:2]) not in i]
+                    if variant == "DIRECT_WEIGHT_REUSE":
+                        print(files)
+                        files = [files[0]]
+                    print(len(files))
+                    additional_settings["meta"] ["guided_network"] =  ["sorted_models/frozen_lake/" + i for i in files]
+                elif "lunar_lander" in config_name:
+                    files = list(sorted(os.listdir("sorted_models/lunar_lander")))
+                    print(len(files))
+                    files = [i for i in files if "_".join(config_name.split('_')[0:5]) not in i]
+                    if variant == "DIRECT_WEIGHT_REUSE":
+                        print(files)
+                        files = [files[0]]
+                    print(len(files))
+                    additional_settings["meta"]["guided_network"] = ["sorted_models/lunar_lander/" + i for i in files]
+
+            self.run(config_id, additional_settings, console_run=True)
 
     def list_configurations(self):
         print('Index | Config name\n--------------------------')
@@ -70,17 +126,29 @@ class Core():
             print(list(self.configs.items())[int(config_name)][1])
 
 
-    def run(self, config_name):
+    def run(self, config_name, additional_settings=None, console_run=False):
         c, config_name = select(self.configs, config_name)
 
         ts = datetime.now().strftime('%d-%m-%Y_%H-%M')
-        instance_name = input(f'Instance name [{config_name}_{ts}]: ')
+        default_name = f'{config_name}_{ts}'
+        if not console_run:
+            instance_name = input(f'Instance name [{config_name}_{ts}]: ')
+        else:
+            instance_name = default_name
+
         if instance_name == '':
-            instance_name = f'{config_name}_{ts}'
+            instance_name = default_name
 
         print(f'Running "{instance_name}" ({config_name})...')
-        r = Runner(instance_name, self.configs[config_name])
-        r.run()
+
+        if additional_settings is None:
+            additional_settings = {}
+
+        config_to_run = deepcopy(self.configs[config_name])
+
+        config_to_run = merge_dicts(config_to_run, additional_settings)
+        r = Runner(instance_name, config_to_run)
+        r.run(console_run=console_run)
         self.running[instance_name] = r
     
     def list_running(self):
