@@ -49,7 +49,7 @@ def moving_average(data, window_size):
 
 csv_file_path = 'results/FrozenLake-map_1_08-08-2024_16-23/stats/train_ep_data.csv'
 
-csv_file_paths=os.listdir('csv_results')
+csv_file_paths=list(sorted(os.listdir('csv_results')))
 csv_file_paths = ['csv_results/' + i for i in csv_file_paths]
 for csv_file_path in csv_file_paths:
     frame_idx = []

@@ -106,15 +106,15 @@ def plot_data(data):
 
     plt.figure(figsize=(10, 6))
     if 'minigrid' in file_path:
-        labels = ['RANDOM', 'STUDENT', *[i for i in os.listdir('sorted_models/minigrid/') if file_path.split('/')[1].split('_')[0] not in i]]
+        labels = ['RANDOM', 'STUDENT', *[i for i in list(sorted(os.listdir('sorted_models/minigrid/'))) if file_path.split('/')[1].split('_')[0] not in i]]
     if 'lunar_lander' in file_path:
         print(file_path)
         print("_".join(file_path.split('/')[1].split('_')[0:5]))
         labels = ['RANDOM', 'STUDENT',
-                  *[i for i in os.listdir('sorted_models/lunar_lander/') if "_".join(file_path.split('/')[1].split('_')[0:5]) not in i]]
+                  *[i for i in list(sorted(os.listdir('sorted_models/lunar_lander/'))) if "_".join(file_path.split('/')[1].split('_')[0:5]) not in i]]
     if 'FrozenLake' in file_path:
         labels = ['RANDOM', 'STUDENT',
-                  *[i for i in os.listdir('sorted_models/frozen_lake/') if "_".join(file_path.split('/')[1].split('_')[0:2]) not in i]]
+                  *[i for i in list(sorted(os.listdir('sorted_models/frozen_lake/'))) if "_".join(file_path.split('/')[1].split('_')[0:2]) not in i]]
 
     plt.plot(data['frame_idx'], data["models_avg_reward"], label=labels)
     plt.title('Models Average Reward')

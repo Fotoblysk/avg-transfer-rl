@@ -61,7 +61,7 @@ def process_extracted_results(src_dir, dest_dir):
                     extract_tar(tar_path, temp_extract_dir)
 
                     # Find the extracted directory
-                    extracted_dir = os.path.join(temp_extract_dir, os.listdir(temp_extract_dir)[0])
+                    extracted_dir = os.path.join(temp_extract_dir, list(sorted(os.listdir(temp_extract_dir)))[0])
 
                     # Process the model file
                     model_path = os.path.join(extracted_dir, 'model')

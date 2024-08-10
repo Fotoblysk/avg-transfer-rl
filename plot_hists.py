@@ -105,15 +105,15 @@ def plot_data(data):
 
     plt.figure(figsize=(10, 6))
     if 'MiniGrid' in file_path:
-        labels = ['RANDOM', 'STUDENT', *[i for i in os.listdir('sorted_models/minigrid/') if file_path.split('/')[1].split('_')[0] not in i]]
+        labels = ['RANDOM', 'STUDENT', *[i for i in list(sorted(os.listdir('sorted_models/minigrid/'))) if file_path.split('/')[1].split('_')[0] not in i]]
     if 'lunar_lander' in file_path:
         print(file_path)
         print("_".join(file_path.split('/')[1].split('_')[0:5]))
         labels = ['RANDOM', 'STUDENT',
-                  *[i for i in os.listdir('sorted_models/lunar_lander/') if "_".join(file_path.split('/')[1].split('_')[0:5]) not in i]]
+                  *[i for i in list(sorted(os.listdir('sorted_models/lunar_lander/'))) if "_".join(file_path.split('/')[1].split('_')[0:5]) not in i]]
     if 'FrozenLake' in file_path:
         labels = ['RANDOM', 'STUDENT',
-                  *[i for i in os.listdir('sorted_models/frozen_lake/') if "_".join(file_path.split('/')[1].split('_')[0:2]) not in i]]
+                  *[i for i in list(sorted(os.listdir('sorted_models/frozen_lake/'))) if "_".join(file_path.split('/')[1].split('_')[0:2]) not in i]]
 
     plt.plot(data['frame_idx'], data["models_avg_reward"], label=labels)
     plt.title('Models Average Reward')
@@ -123,7 +123,8 @@ def plot_data(data):
     plt.show()
 
     plt.figure(figsize=(10, 6))
-    plt.plot(data['frame_idx'], data["model_choose_probs"], label=labels[1:])
+    #plt.plot(data['frame_idx'], data["model_choose_probs"], label=labels[1:])
+    plt.plot(data['frame_idx'], data["model_choose_probs"], label=labels[len(labels)-len(data["model_choose_probs"][0]):])
     plt.title('Models Probs')
     plt.xlabel('Frame Index')
     plt.ylabel('Probs')
@@ -145,6 +146,11 @@ if __name__ == "__main__":
     csv_file_path = 'results/FrozenLake-map_2_08-08-2024_16-15/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Empty-5x5-v0_09-08-2024_21-37/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Empty-5x5-v0_09-08-2024_21-47/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-5x5-v0_09-08-2024_22-05/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-16x16-v0_10-08-2024_01-41/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-25/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-48/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-49/stats/train_ep_data.csv'
     file_path = csv_file_path
     data = read_csv(file_path)
     plot_data(data)

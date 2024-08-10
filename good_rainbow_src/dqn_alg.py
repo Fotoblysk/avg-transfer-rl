@@ -109,7 +109,7 @@ class DQNAgent:
             conv_space: bool = False,
             min_memory_size: int = 80000,
             learning_interval: int = 4,  # is for 32 batch_size
-            epsilon_decay: float = 1 / 100000,  # min after 1M epizodes
+            epsilon_decay: float = 1 / 200000,  # min after 1M epizodes
             max_epsilon: float = 1,
             min_epsilon: float = 0.01,
             correct_dims: bool = False,
@@ -140,6 +140,7 @@ class DQNAgent:
             n_step (int): step number to calculate n-step td error
         """
 
+        self.probs = None
         self.variant = variant
         self.start_time = time.time()
         self.max_steps = env.spec.max_episode_steps if env.spec.max_episode_steps is not None else env.max_steps
@@ -227,7 +228,7 @@ class DQNAgent:
         # guided network experiment
         print("pre-guid")
         print(guided_network)
-        if self.variant == "APDPR" or self.variant == "PRQL":
+        if "APDPR" in self.variant or self.variant == "PRQL":
             if guided_network is not None:
                 # self.end_avg_reward = 0
                 print("guid")
@@ -253,10 +254,16 @@ class DQNAgent:
                 self.random_usage_ratio_sum = 1 / (len(guided_network) + 1)  # just for consistency
                 self.probs = None
                 # temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
-                self.probs = softmax(
-                    torch.tensor(
-                        [i * self.guided_temperature for i in [self.student_avg_reward, *self.teacher_avg_reward]],
-                        dtype=torch.float64))
+                if self.variant == "APDPR_WITH_RANDOM":
+                    self.probs = softmax(
+                        torch.tensor(
+                            [i * self.guided_temperature for i in [self.random_avg_reward, self.student_avg_reward, *self.teacher_avg_reward]],
+                            dtype=torch.float64))
+                else:
+                    self.probs = softmax(
+                        torch.tensor(
+                            [i * self.guided_temperature for i in [self.student_avg_reward, *self.teacher_avg_reward]],
+                            dtype=torch.float64))
 
                 for fname in guided_network:
                     state = torch.load(fname)
@@ -279,24 +286,31 @@ class DQNAgent:
                                 'models_usage_hist', 'models_avg_reward', 'model_choose_probs']  # TODO finish when more
         self.loss_stats_labels = ['frame_idx', 'loss_value']
 
-        with open(f"{self.save_stats_path}/train_ep_data.csv", mode='a', newline='') as file:
+        with open(f"{self.save_stats_path}/train_ep_data.csv", mode='w', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=self.ep_stats_labels)
             writer.writeheader()
 
-        with open(f"{self.save_stats_path}/train_loss_data.csv", mode='a', newline='') as file:
+        with open(f"{self.save_stats_path}/train_loss_data.csv", mode='w', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=self.loss_stats_labels)
             writer.writeheader()
 
-        with open(f"{self.save_stats_path}/target_updates_frames.csv", mode='a', newline='') as file:
+        with open(f"{self.save_stats_path}/target_updates_frames.csv", mode='w', newline='') as file:
             writer = csv.DictWriter(file, fieldnames=['frame_idx'])
             writer.writeheader()
         if variant == "NO_TRANSFER":
             pass
 
         if variant == "DIRECT_WEIGHT_REUSE":
-            state = guided_network[0]
+            state = torch.load(guided_network[0])
             self.dqn.load_state_dict(state["dqn"])
             self.dqn_target.load_state_dict(state["dqn"])
+
+        with open(f"{self.save_stats_path}/used_models.csv", mode='w', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=['frame_idx'])
+            for i in guided_network:
+                writer.writerow({
+                    'frame_idx': i,
+                })
 
     def select_action(self, state: np.ndarray, force_epsilon=None, network=None) -> np.ndarray:
         if network is None:
@@ -442,10 +456,12 @@ class DQNAgent:
                 writer.writerow({
                     'frame_idx': i,
                 })
+
             self.target_update_frames.clear()
         with open(f'{self.save_stats_path}/current_speed.csv', 'w') as file:
             # Write a string to the file
             file.write(f"{int(60 * 60 * frame_idx / (time.time() - self.start_time))}")
+
 
     def reset_interep_stats(self, frame_idx):
         self.training_state.score = 0
@@ -455,12 +471,19 @@ class DQNAgent:
             self.current_ep_random_times_used = 0
             self.current_ep_student_times_used = 0
             self.current_ep_teacher_times_used.fill(0)
-        if self.variant == "APDPR" or self.variant == "PRQL":
-            temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
+        if "APDPR" in self.variant or self.variant == "PRQL":
+            if self.variant == "APDPR_WITH_RANDOM":
+                temperatured_values = [self.random_avg_reward, self.student_avg_reward, *self.teacher_avg_reward]
+            else:
+                temperatured_values = [self.student_avg_reward, *self.teacher_avg_reward]
             self.probs = softmax(
                 torch.tensor([i * self.guided_temperature for i in temperatured_values], dtype=torch.float64))
-            if self.variant == "APDPR":
-                self.probs = self.adjust_probabilities(self.probs)
+            if "APDPR" in self.variant:
+                if self.variant == "APDPR_WITH_RANDOM":
+                    self.probs = self.adjust_probabilities(self.probs, 1)
+                else:
+                    self.probs = self.adjust_probabilities(self.probs, 0)
+
         if self.variant == "PRQL":
             self.current_prql_policy = np.random.choice(range(len(self.probs)), p=self.probs)
             self.current_prql_psi = self.max_prql_psi
@@ -498,26 +521,27 @@ class DQNAgent:
 
         return adjusted_arr
 
-    def adjust_probabilities(self, probs):
+    def adjust_probabilities(self, probs, idx):
         old_probs = probs
         n = len(probs)
         min_first_prob = 1 / (n + 1)
         # Ensure the sum of the probabilities is 1
         probs = self.adjust_array(probs, self.min_epsilon / n)
-        if probs[0] < min_first_prob:
+        if probs[idx] < min_first_prob:
             total_sum = sum(probs)
             # Calculate the sum of the original remaining probabilities
-            original_remaining_sum = total_sum - probs[0]
+            original_remaining_sum = total_sum - probs[idx]
             # Set the first element to min_first_prob
-            probs[0] = max(probs[0], min_first_prob)
+            probs[idx] = max(probs[idx], min_first_prob)
             # Calculate the sum of the remaining probabilities
-            remaining_sum = 1 - probs[0]
+            remaining_sum = 1 - probs[idx]
             # Adjust the remaining probabilities proportionally
-            for i in range(1, n):
+            for i in [*list(range(0, idx)), *list(range(2, n))]:
                 probs[i] = probs[i] * remaining_sum / original_remaining_sum
         if np.isnan(probs).any() or not np.isclose(sum(probs), 1):
-            print("Computation error use uncorrected probs")
-            return old_probs
+            print("Computation error use uncorrected probs, force correction")
+            probs[0] = 1 - probs[1:]
+            return probs
         else:
             return probs
 
@@ -541,7 +565,10 @@ class DQNAgent:
 
     def apdpr_epsilon_policy_choose(self):
 
-        self.chosen_policy = np.random.choice(range(len(self.probs)), p=self.probs)
+        if self.variant == "APDPR_WITH_RANDOM":
+            self.chosen_policy = np.random.choice(range(len(self.probs)), p=self.probs) - 1
+        else:
+            self.chosen_policy = np.random.choice(range(len(self.probs)), p=self.probs)
         if self.chosen_policy == 0:
             network = self.dqn
         else:
@@ -550,7 +577,7 @@ class DQNAgent:
         return action
 
     def action_selection_policy_choose(self):
-        if self.variant == "APDPR" and self.teacher_network is not None:
+        if "APDPR" in self.variant and self.teacher_network is not None:
             action = self.apdpr_epsilon_policy_choose()
         elif self.variant == "PRQL" and self.teacher_network is not None:
             action = self.prql_epsilon_policy_choose()
@@ -606,10 +633,10 @@ class DQNAgent:
         # if episode ends
         if done:
             # TODO Am I sure?
-            if self.teacher_network is not None and self.variant == "APDPR" or self.variant == "PRQL":
+            if self.teacher_network is not None and "APDPR" in self.variant or self.variant == "PRQL":
                 self.guided_temperature += self.guided_temp_decay
 
-            if self.teacher_network is not None and self.variant == "APDPR":
+            if self.teacher_network is not None and "APDPR" in self.variant:
                 (self.random_avg_reward,
                  self.random_usage_ratio_sum) = (
                     self.reward_update_apdpr(self.random_avg_reward,

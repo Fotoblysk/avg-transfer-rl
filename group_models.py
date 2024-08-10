@@ -25,7 +25,7 @@ def process_tar_file(tar_path, dest_dir):
 
             # Compress each directory inside the extracted 'results' directory
             results_path = os.path.join(temp_extract_dir, 'results')
-            for item in os.listdir(results_path):
+            for item in list(sorted(os.listdir(results_path))):
                 item_path = os.path.join(results_path, item)
                 if os.path.isdir(item_path):
                     compressed_path = os.path.join(dest_dir, f"{item}.tar.gz")
