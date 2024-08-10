@@ -110,7 +110,7 @@ class DQNAgent:
             min_memory_size: int = 80000,
             learning_interval: int = 4,  # is for 32 batch_size
             epsilon_decay: float = 1 / 200000,  # min after 1M epizodes
-            max_epsilon: float = 1,
+            max_epsilon: float = 0.1,
             min_epsilon: float = 0.01,
             correct_dims: bool = False,
             reward_clip=None,
