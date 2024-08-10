@@ -34,7 +34,7 @@ def get_configs(configs_to_inject):
         },
         "params": {
             "seed": 123,
-            "num_frames": 2000000,
+            "num_frames": 400000,
             "memory_size": 100000,
             # in orginal is 1M sadly not anough ram 0.4M should be possible tho might get to swap so 0.3 for safety # goes to swap :( 0.09 for now
             "batch_size": 128,  # on internet  128 *12 test, 32 in paper
@@ -48,7 +48,7 @@ def get_configs(configs_to_inject):
         }
     }
     defaults["params"]["target_update"] = 100 // defaults["params"]["learning_interval"]  # 32000
-    defaults["params"]["min_memory_size"] = min(int(defaults["params"]["memory_size"] * 0.9), 80000)
+    defaults["params"]["min_memory_size"] = min(int(defaults["params"]["memory_size"] * 0.9), 8000) # TODO 80000
 
     configs_raw = configs_to_inject
 

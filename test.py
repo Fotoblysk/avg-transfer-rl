@@ -1,41 +1,38 @@
-
-import torch
 import numpy as np
-import matplotlib.pyplot as plt
 
-def softmax(x):
-    """
-    Compute the softmax of vector x.
 
-    Parameters:
-    x (torch.Tensor): Input tensor.
+def adjust_array(arr, some_var):
+    # Step 1: Calculate the minimum threshold
+    min_threshold = 1 / some_var
 
-    Returns:
-    torch.Tensor: Softmax of the input tensor.
-    """
-    return torch.nn.functional.softmax(x, dim=0)
+    # Step 2: Adjust elements below the threshold
+    adjusted_arr = np.maximum(arr, min_threshold)
 
-# Generate t values from 0.001 to 10
-t_values = np.linspace(1e-6, 2, 1000)
+    # Step 3: Calculate the excess
+    excess = np.sum(adjusted_arr) - 1
 
-# Initialize lists to store softmax values
-softmax_10t = []
-softmax_t = []
+    # Step 4: Distribute the excess proportionally
+    if excess > 0:
+        # Find elements that were above the threshold
+        above_threshold_indices = arr > min_threshold
+        above_threshold_values = arr[above_threshold_indices]
 
-# Compute softmax for each t
-for t in t_values:
-    x = torch.tensor([2 * 1/t, 1/t], dtype=torch.float32)
-    softmax_vals = softmax(x)
-    softmax_10t.append(softmax_vals[0].item())
-    softmax_t.append(softmax_vals[1].item())
+        # Calculate the total sum of elements above the threshold
+        total_above_threshold = np.sum(above_threshold_values)
 
-# Plot the results
-plt.figure(figsize=(10, 6))
-plt.plot(t_values, softmax_10t, label='softmax(10t)')
-plt.plot(t_values, softmax_t, label='softmax(t)')
-plt.title('Softmax of [10t, t] for t in [0.001, 10]')
-plt.xlabel('t')
-plt.ylabel('Softmax value')
-plt.legend()
-plt.grid(True)
-plt.show()
+        # Reduce the elements proportionally
+        reduction_factors = above_threshold_values / total_above_threshold
+        reduction_amounts = reduction_factors * excess
+
+        # Apply the reductions
+        adjusted_arr[above_threshold_indices] -= reduction_amounts
+
+    return adjusted_arr
+
+
+# Example usage
+arr = np.array([0.001, 0.1, 0.699, 0.2])
+some_var = 10
+adjusted_arr = adjust_array(arr, some_var)
+print(adjusted_arr)
+print(np.sum(adjusted_arr))  # Should be 1
