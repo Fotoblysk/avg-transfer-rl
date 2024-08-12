@@ -257,7 +257,8 @@ class DQNAgent:
                 if self.variant == "APDPR_WITH_RANDOM":
                     self.probs = softmax(
                         torch.tensor(
-                            [i * self.guided_temperature for i in [self.random_avg_reward, self.student_avg_reward, *self.teacher_avg_reward]],
+                            [i * self.guided_temperature for i in
+                             [self.random_avg_reward, self.student_avg_reward, *self.teacher_avg_reward]],
                             dtype=torch.float64))
                 else:
                     self.probs = softmax(
@@ -369,7 +370,6 @@ class DQNAgent:
             else:
                 one_step_transition = self.transition
 
-
             # add a single step transition
             if one_step_transition:
                 self.memory.store(*one_step_transition)
@@ -467,7 +467,6 @@ class DQNAgent:
             # Write a string to the file
             file.write(f"{int(60 * 60 * frame_idx / (time.time() - self.start_time))}")
 
-
     def reset_interep_stats(self, frame_idx):
         self.training_state.score = 0
         self.training_state.last_frame_ep_end = frame_idx
@@ -545,10 +544,10 @@ class DQNAgent:
                 probs[i] = probs[i] * remaining_sum / original_remaining_sum
         if np.isnan(probs).any() or not np.isclose(sum(probs), 1):
             print("Computation error use uncorrected probs, force correction")
-            probs[-1] = max(0, 1 - np.sum(probs[0:-1]))
+            probs[idx] = max(0, 1 - (np.sum(probs[0:idx]) + np.sum(probs[idx + 1:])))
             return probs
         else:
-            probs[-1] = max(0, 1 - np.sum(probs[0:-1]))
+            probs[idx] = max(0, 1 - (np.sum(probs[0:idx]) + np.sum(probs[idx + 1:])))
             return probs
 
     def prql_epsilon_policy_choose(self):
@@ -691,7 +690,6 @@ class DQNAgent:
                         ))
 
             self.update_stats(frame_idx)
-
 
             self.training_state.ep_id += 1
             self.training_state.ep_step = 0
