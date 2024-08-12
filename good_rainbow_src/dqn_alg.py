@@ -541,7 +541,7 @@ class DQNAgent:
             # Calculate the sum of the remaining probabilities
             remaining_sum = 1 - probs[idx]
             # Adjust the remaining probabilities proportionally
-            for i in [*list(range(0, idx)), *list(range(2, n))]:
+            for i in [*list(range(0, idx)), *list(range(idx, n))]:
                 probs[i] = probs[i] * remaining_sum / original_remaining_sum
         if np.isnan(probs).any() or not np.isclose(sum(probs), 1):
             print("Computation error use uncorrected probs, force correction")
