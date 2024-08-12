@@ -499,7 +499,7 @@ class DQNAgent:
 
     def adjust_array(self, arr, some_var):
         # Step 1: Calculate the minimum threshold
-        arr = arr.numpy(dtype=np.float64)
+        arr = arr.numpy().astype(np.float64)
         min_threshold = some_var
 
         # Step 2: Adjust elements below the threshold
