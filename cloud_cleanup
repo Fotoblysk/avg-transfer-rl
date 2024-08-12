@@ -54,14 +54,15 @@ while [ "$not_all_done" != "0" ]; do
       scp -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey -P "$port" "$user@$host:/root/results.tar.gz" "./cloud_results/$exp_set-$env_group-$avg_id/$runner_id"
       if [ $? -eq 0 ]; then
         echo "Done removing instance"
-        vastai destroy instance "$instance_id"
+        echo "$runner_id $exp_set $avg_id $env_group"
+        #vastai destroy instance "$instance_id"
       else
         echo "SCP failed"
         not_all_done=is_done
        fi
     else
       echo "Not done yet"
-      ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'find /workspace -name train_ep_data.csv -exec sh -c '\''tail -n 2 "{}"'\'' \;'
+      ssh -q -o "StrictHostKeyChecking no" -i ~/vast_tmp/sshkey "$ssh_url" 'find /workspace/avg-transfer-rl -name current_speed.csv -exec sh -c '\''cat "{}" | grep ""'\'' \;'
       not_all_done=is_done
     fi
   done
