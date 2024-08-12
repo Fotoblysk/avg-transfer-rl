@@ -545,7 +545,7 @@ class DQNAgent:
                 probs[i] = probs[i] * remaining_sum / original_remaining_sum
         if np.isnan(probs).any() or not np.isclose(sum(probs), 1):
             print("Computation error use uncorrected probs, force correction")
-            probs[0] = 1 - probs[1:]
+            probs[0] = 1 - sum(probs[1:])
             return probs
         else:
             return probs
