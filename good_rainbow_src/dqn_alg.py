@@ -499,7 +499,7 @@ class DQNAgent:
 
     def adjust_array(self, arr, some_var):
         # Step 1: Calculate the minimum threshold
-        arr = arr.numpy()
+        arr = arr.numpy(dtype=np.float64)
         min_threshold = some_var
 
         # Step 2: Adjust elements below the threshold
@@ -545,9 +545,10 @@ class DQNAgent:
                 probs[i] = probs[i] * remaining_sum / original_remaining_sum
         if np.isnan(probs).any() or not np.isclose(sum(probs), 1):
             print("Computation error use uncorrected probs, force correction")
-            probs[0] = 1 - sum(probs[1:])
+            probs[-1] = max(0, 1 - np.sum(probs[0:-1]))
             return probs
         else:
+            probs[-1] = max(0, 1 - np.sum(probs[0:-1]))
             return probs
 
     def prql_epsilon_policy_choose(self):
