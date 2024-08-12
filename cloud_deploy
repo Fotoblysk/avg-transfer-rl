@@ -81,7 +81,7 @@ for ((avg_id=0; avg_id<AVG_MAX; avg_id++)); do
 
         if [ "$min_task" != "$max_task" ]; then
           echo "Launching instance $runner_id, $avg_id, $min_task, $max_task"
-          result=$(vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 40 --ssh --direct --env "-e MY_RUNNER_ID=$runner_id -e MIN_TASK=$min_task -e MAX_TASK=$max_task -e ENV_GROUP=$env_group -e EXP_SET=$exp_set -e AVG_ID=$avg_id" --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/cloud_sync/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";)
+          result=$(vastai create instance "$I_ID" --image pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel --disk 40 --ssh --direct --env "-e MY_RUNNER_ID=$runner_id -e MIN_TASK=$min_task -e MAX_TASK=$max_task -e ENV_GROUP=$env_group -e EXP_SET=$exp_set -e AVG_ID=$avg_id" --onstart-cmd "env | grep _ >> /etc/environment; wget https://raw.githubusercontent.com/Fotoblysk/avg-transfer-rl/master/cloud_startup.sh; chmod a+x cloud_startup.sh; bash cloud_startup.sh;";)
           echo "$result"
           launched=$(echo $result | grep "'success': True" | wc -l)
           echo "Launched: $launched"
