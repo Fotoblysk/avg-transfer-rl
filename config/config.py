@@ -1,3 +1,5 @@
+import time
+
 from config.env_config.frozen_lake import get_frozen_lake_experiment
 from config.env_config.gridword import get_minigrid_experiment
 from config.env_config.lunar_lander import get_lunar_lander_experiment
@@ -33,7 +35,7 @@ def get_configs(configs_to_inject):
             "atari": True,
         },
         "params": {
-            "seed": 123,
+            "seed": time.time_ns() % (2**30 - 1),
             "num_frames": 400000,
             "memory_size": 100000,
             # in orginal is 1M sadly not anough ram 0.4M should be possible tho might get to swap so 0.3 for safety # goes to swap :( 0.09 for now

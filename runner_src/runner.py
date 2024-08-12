@@ -126,6 +126,14 @@ class Runner():
         # agent.test(video_folder=video_folder)
         self.agent.train(self.config["params"]["num_frames"], testing_function=continuous_testing,
                          plotting_interval=self.config["plot"]["interval"])
+
+        final_score = 0
+        for i in range(100):
+            final_score += self.agent.test()/100
+
+        with open(f'results/{self.name}/stats/final_score.txt', 'w') as file:
+            file.write(f"{final_score}")
+
         self.running = False
 
     def run(self, console_run=False):

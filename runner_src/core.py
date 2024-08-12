@@ -149,7 +149,8 @@ class Core():
         config_to_run = merge_dicts(config_to_run, additional_settings)
         r = Runner(instance_name, config_to_run)
         r.run(console_run=console_run)
-        self.running[instance_name] = r
+        r = None
+        #self.running[instance_name] = r
     
     def list_running(self):
         print('Index | Instance name\n--------------------------')

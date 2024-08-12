@@ -306,10 +306,15 @@ class DQNAgent:
             self.dqn_target.load_state_dict(state["dqn"])
 
         with open(f"{self.save_stats_path}/used_models.csv", mode='w', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=['frame_idx'])
-            for i in guided_network:
+            writer = csv.DictWriter(file, fieldnames=['network_name'])
+            if guided_network is not None:
+                for i in guided_network:
+                    writer.writerow({
+                        'network_name': i,
+                    })
+            else:
                 writer.writerow({
-                    'frame_idx': i,
+                    'network_name': 'LEARNING_FROM_SCRATCH',
                 })
 
     def select_action(self, state: np.ndarray, force_epsilon=None, network=None) -> np.ndarray:
@@ -326,7 +331,7 @@ class DQNAgent:
             self.dqn.reset_noise()  # FIXME workaround to ensure exploration during initial frames
             self.dqn_target.reset_noise()
 
-        if epsilon > np.random.random():  # fixme added back epsilon probably not needed but lets keep it just for test
+        if epsilon > np.random.random() or (self.variant == "APDPR_WITH_RANDOM" and self.chosen_policy == -1):
             selected_action = self.env.action_space.sample()
             self.chosen_policy = -1
         else:
@@ -344,7 +349,7 @@ class DQNAgent:
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, np.float64, bool]:
         """Take an action and return the response of the env."""
         next_state, reward, terminated, truncated, _ = self.env.step(
-            int(action))  # TODO this is just workaround for frozen lake
+            int(action))
         if self.reward_clip is not None:
             reward = min(max(reward, self.reward_clip[0]), self.reward_clip[1])
 
@@ -364,7 +369,7 @@ class DQNAgent:
             else:
                 one_step_transition = self.transition
 
-            # TODO no transitions when buffer isn't full (transitions in buffer are not applied for last elements?)
+
             # add a single step transition
             if one_step_transition:
                 self.memory.store(*one_step_transition)
@@ -430,7 +435,7 @@ class DQNAgent:
             writer.writerow({
                 'frame_idx': frame_idx,
                 'score': self.training_state.score,
-                'disc_score': self.training_state.score,  # TODO fix it g_score
+                'disc_score': self.training_state.score,  # TODO fix it g_score, changed mind I don't care
                 'ep_len': frame_idx - self.training_state.last_frame_ep_end,
                 'action_hist': self.training_state.action_hist,
                 'models_usage_hist': [i / (frame_idx - self.training_state.last_frame_ep_end) for i in
@@ -592,7 +597,6 @@ class DQNAgent:
         # return (0.99*total_avg * epizod_n + 1.01*(current_times_used / ep_steps) * computed_rewards) / (epizod_n + 1)
 
     def reward_update_prql(self, total_avg, policy_eps_used, computed_rewards):
-        # TODO finish
         return (total_avg * policy_eps_used + computed_rewards) / (policy_eps_used + 1), policy_eps_used + 1
 
     def train_step(self, frame_idx, num_frames: int, testing_function=None):
@@ -605,7 +609,7 @@ class DQNAgent:
         self.training_state.score += reward
         self.ep_rewards_buffer[self.training_state.ep_step] = reward
 
-        # NoisyNet: removed decrease of epsilon # TODO added as NoisyNet encapsulate randomnes and network can learn to remove randomnes from the input to much in early learing
+        # added as NoisyNet encapsulate randomnes and network can learn to remove randomnes from the input to much in early learing
         self.epsilon = max(
             self.min_epsilon, self.epsilon - (
                     self.max_epsilon - self.min_epsilon
@@ -717,20 +721,21 @@ class DQNAgent:
         self.env.close()
 
     # TODO we dont really need test for recording during learning as RecordVideo enables ep_number trigger
-    def test(self, video_folder: str, video_prefix="rl-video") -> None:
+    def test(self, video_folder=None, video_prefix="rl-video") -> float:
         """Test the agent."""
         self.training_state.is_test = True
 
         # for recording a video
         naive_env = self.env
-        self.env = gym.wrappers.RecordVideo(self.env, name_prefix=video_prefix, video_folder=video_folder)
+        if video_folder is not None:
+            self.env = gym.wrappers.RecordVideo(self.env, name_prefix=video_prefix, video_folder=video_folder)
 
-        state, _ = self.env.reset(seed=self.seed)
+        state, _ = self.env.reset()
         done = False
         score = 0
 
         while not done:
-            action = self.select_action(state)
+            action = self.select_action(state, force_epsilon=0)
             next_state, reward, done = self.step(action)
 
             state = next_state
@@ -742,6 +747,7 @@ class DQNAgent:
         # reset
         self.env = naive_env
         self.training_state.is_test = False
+        return score
 
     def _compute_dqn_loss(self, samples: Dict[str, np.ndarray], gamma: float) -> torch.Tensor:
         """Return categorical dqn loss."""

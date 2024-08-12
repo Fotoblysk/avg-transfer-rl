@@ -25,7 +25,12 @@ csv_file_path = 'results/MiniGrid-Empty-16x16-v0_10-08-2024_01-42/stats/train_ep
 csv_file_path = 'results/MiniGrid-Empty-16x16-v0_10-08-2024_01-43/stats/train_ep_data.csv'
 csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-25/stats/train_ep_data.csv'
 csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-48/stats/train_ep_data.csv'
-csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-49/stats/train_ep_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_15-31/stats/train_ep_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_15-28/stats/train_ep_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-46/stats/train_ep_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-45/stats/train_ep_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-44/stats/train_ep_data.csv'
+csv_file_path = 'results/MiniGrid-Empty-8x8-v0_11-08-2024_22-14/stats/train_ep_data.csv'
 
 #csv_file_path = 'results/lunar_lander_10_0_0/stats/train_ep_data.csv'
 #csv_file_path = 'results/CartPole/stats/train_ep_data.csv'

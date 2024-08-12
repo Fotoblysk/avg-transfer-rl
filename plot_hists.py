@@ -151,6 +151,9 @@ if __name__ == "__main__":
     csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-25/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-48/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-49/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-46/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-45/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-44/stats/train_ep_data.csv'
     file_path = csv_file_path
     data = read_csv(file_path)
     plot_data(data)
