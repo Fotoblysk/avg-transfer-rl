@@ -12,6 +12,33 @@ from cycler import cycler
 from good_rainbow_src.dqn_alg import softmax
 
 
+def get_action_mapping(path, a):
+    if 'MiniGrid' in path:
+        return {
+            0: "left",
+            1: "right",
+            2: "forward",
+            3: "pickup",
+            4: "drop",
+            5: "toggle",
+            6: "done"}[a]
+    if 'lunar_lander' in path:
+        return {
+            0: "do nothing",
+            1: "fire left orientation engine",
+            2: "fire main engine",
+            3: "fire right orientation engine"
+        }[a]
+
+    if 'FrozenLake' in path:
+        return {
+            0: "Move left",
+            1: "Move down",
+            2: "Move right",
+            3: "Move up"
+        }[a]
+
+
 def preprocess_list_string(list_string):
     # Remove newlines and extra spaces
     list_string = list_string.replace('\n', ' ').strip()
@@ -60,9 +87,9 @@ def read_csv(file_path):
 def plot_data(data):
     NUM_COLORS = len(data["models_usage_hist"][0])
 
-    #cm = plt.cm.nipy_spectral
+    # cm = plt.cm.nipy_spectral
     import seaborn as sns
-    #cm = sns.color_palette('hls', NUM_COLORS)
+    # cm = sns.color_palette('hls', NUM_COLORS)
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
 
@@ -77,25 +104,16 @@ def plot_data(data):
 
     custom_cycler = cycler(color=extended_colors) + cycler(linestyle=extended_linestyles)
 
-
     print(len(colors))
 
-    plt.rc('axes', prop_cycle=custom_cycler)# [cm(1.*i/NUM_COLORS) for i in range(NUM_COLORS)]))
+    plt.rc('axes', prop_cycle=custom_cycler)  # [cm(1.*i/NUM_COLORS) for i in range(NUM_COLORS)]))
 
     # Plot action_hist
     print(len(data['frame_idx']))
     plt.figure(figsize=(10, 6))
-    plt.plot(data['frame_idx'], data["action_hist"])
+    plt.plot(data['frame_idx'], data["action_hist"],
+             label=[get_action_mapping(file_path, a) for a in range(len(data["action_hist"][0]))])
     plt.title('Action History')
-    plt.xlabel('Frame Index')
-    plt.ylabel('Value')
-    plt.legend()
-    plt.show()
-
-    # Plot models_usage_hist
-    plt.figure(figsize=(10, 6))
-    plt.plot(data['frame_idx'], data["models_usage_hist"])
-    plt.title('Models Usage History')
     plt.xlabel('Frame Index')
     plt.ylabel('Value')
     plt.legend()
@@ -103,18 +121,30 @@ def plot_data(data):
 
     # Plot models_avg_reward
 
-    plt.figure(figsize=(10, 6))
     if 'MiniGrid' in file_path:
-        labels = ['RANDOM', 'STUDENT', *[i for i in list(sorted(os.listdir('sorted_models/minigrid/'))) if file_path.split('/')[1].split('_')[0] not in i]]
+        labels = ['RANDOM', 'STUDENT', *[i for i in list(sorted(os.listdir('sorted_models/minigrid/'))) if
+                                         file_path.split('/')[1].split('_')[0] not in i]]
     if 'lunar_lander' in file_path:
         print(file_path)
         print("_".join(file_path.split('/')[1].split('_')[0:5]))
         labels = ['RANDOM', 'STUDENT',
-                  *[i for i in list(sorted(os.listdir('sorted_models/lunar_lander/'))) if "_".join(file_path.split('/')[1].split('_')[0:5]) not in i]]
+                  *[i for i in list(sorted(os.listdir('sorted_models/lunar_lander/'))) if
+                    "_".join(file_path.split('/')[1].split('_')[0:5]) not in i]]
     if 'FrozenLake' in file_path:
         labels = ['RANDOM', 'STUDENT',
-                  *[i for i in list(sorted(os.listdir('sorted_models/frozen_lake/'))) if "_".join(file_path.split('/')[1].split('_')[0:2]) not in i]]
+                  *[i for i in list(sorted(os.listdir('sorted_models/frozen_lake/'))) if
+                    "_".join(file_path.split('/')[1].split('_')[0:2]) not in i]]
+    # Plot models_usage_hist
 
+    plt.figure(figsize=(10, 6))
+    plt.plot(data['frame_idx'], data["models_usage_hist"], label=labels)
+    plt.title('Models Usage History')
+    plt.xlabel('Frame Index')
+    plt.ylabel('Value')
+    plt.legend()
+    plt.show()
+
+    plt.figure(figsize=(10, 6))
     plt.plot(data['frame_idx'], data["models_avg_reward"], label=labels)
     plt.title('Models Average Reward')
     plt.xlabel('Frame Index')
@@ -123,8 +153,9 @@ def plot_data(data):
     plt.show()
 
     plt.figure(figsize=(10, 6))
-    #plt.plot(data['frame_idx'], data["model_choose_probs"], label=labels[1:])
-    plt.plot(data['frame_idx'], data["model_choose_probs"], label=labels[len(labels)-len(data["model_choose_probs"][0]):])
+    # plt.plot(data['frame_idx'], data["model_choose_probs"], label=labels[1:])
+    plt.plot(data['frame_idx'], data["model_choose_probs"],
+             label=labels[len(labels) - len(data["model_choose_probs"][0]):])
     plt.title('Models Probs')
     plt.xlabel('Frame Index')
     plt.ylabel('Probs')
@@ -133,7 +164,7 @@ def plot_data(data):
 
 
 if __name__ == "__main__":
-    #csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_01-46/stats/train_ep_data.csv'
+    # csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_01-46/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_03-16/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_10-08/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Fetch-8x8-N3-v0_07-08-2024_10-31/stats/train_ep_data.csv'
@@ -153,7 +184,7 @@ if __name__ == "__main__":
     csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_13-49/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-46/stats/train_ep_data.csv'
     csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-45/stats/train_ep_data.csv'
-    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_10-08-2024_16-44/stats/train_ep_data.csv'
+    csv_file_path = 'results/MiniGrid-Empty-8x8-v0_12-08-2024_19-12/stats/train_ep_data.csv'
     file_path = csv_file_path
     data = read_csv(file_path)
     plot_data(data)

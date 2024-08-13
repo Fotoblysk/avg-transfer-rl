@@ -55,7 +55,7 @@ while [ "$not_all_done" != "0" ]; do
       if [ $? -eq 0 ]; then
         echo "Done removing instance"
         echo "$runner_id $exp_set $avg_id $env_group"
-        #vastai destroy instance "$instance_id"
+        vastai destroy instance "$instance_id"
       else
         echo "SCP failed"
         not_all_done=is_done

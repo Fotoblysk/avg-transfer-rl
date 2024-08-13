@@ -140,7 +140,7 @@ class Runner():
         if not self.running:
             if console_run:
                 self.run_t()
-                self.save()
+                #self.save()
             else:
                 self.t = threading.Thread(target=self.run_t) # we can use process in worst case
 
@@ -187,7 +187,6 @@ class Runner():
         }
         torch.save(state, fname)
 
-        print(np.array(self.agent.memory_n.obs_buf[0]))
         if running:
             self.run()
 
